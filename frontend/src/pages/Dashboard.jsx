@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, sevColor } from "../api.js";
+import { api, sevColor, loadInsightsOnce } from "../api.js";
 import GraphView from "../components/GraphView.jsx";
 import { Panel, Spinner, ErrorBox, BoldText } from "../components/ui.jsx";
 
@@ -49,7 +49,8 @@ export default function Dashboard() {
         if (alive) setErr(e.message);
       }
       try {
-        const ins = await api.getInsights();
+        // fetch-once per page load, shared across remounts (see api.js)
+        const ins = await loadInsightsOnce();
         if (alive) setInsights(ins);
       } catch (e) {
         if (alive) setInsightsErr(e.message);

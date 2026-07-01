@@ -1,4 +1,5 @@
 import os
+import asyncio
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 
@@ -18,8 +19,19 @@ from backend.routes.forget import router as forget_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # memory_service configures Cognee on import; nothing else needed at startup
-    import backend.services.memory_service  # noqa: F401 — triggers _configure_cognee()
+    # memory_service configures Cognee on import
+    import backend.services.memory_service as memory_service  # triggers _configure_cognee()
+
+    # Warm the insights cache once at startup (in the background so startup isn't
+    # blocked by the LLM recall). After this, GET /api/insights serves the cached
+    # result until a new incident is ingested or a status changes.
+    async def _warm_insights():
+        try:
+            await memory_service.get_insights()
+        except Exception:
+            pass  # non-fatal: a failed warm just means the first GET computes it
+
+    asyncio.create_task(_warm_insights())
     yield
 
 

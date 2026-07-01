@@ -109,5 +109,18 @@ severity-colored incident nodes with real IDs; detail + memify + alert-analysis 
 - Node LTS installed to ~/.local (no root); frontend deps via npm. `npm run dev` (5173) + backend (8000).
 - Phase 4 LLM spend negligible (~a few recalls for insights/alerts during render tests).
 
+## Phase 4.1 — Insights caching (cost control) ✅
+recall() is the expensive part; it must not fire on every page refresh.
+- [x] Backend: in-memory insights cache (`_insights_cache` + dirty flag + `_insights_lock`).
+  `get_insights()` returns the cache; recomputes only when cold/dirty. Warmed once at startup
+  (background task in lifespan). Response carries `cached` + `generated_at`.
+- [x] Invalidate ONLY on the events that change what insights say: `ingest_incident` (new incident)
+  and `resolve_incident` (status change) call `invalidate_insights()`. Next GET recomputes once.
+- [x] Frontend: `loadInsightsOnce()` memoizes the fetch at module level; Dashboard calls it once on
+  mount and shares the result across remounts / in-app navigation — no refetch on every render.
+- [x] Verified: 3 repeat GETs → all `cached:true`, same timestamp (no recall); after a resolve →
+  one `cached:false` recompute (new timestamp), then cached again. Frontend issued exactly 1
+  /api/insights request across 3 Dashboard↔Alert round-trips.
+
 ## Phase 5 — (pending)
 - [ ] TBD

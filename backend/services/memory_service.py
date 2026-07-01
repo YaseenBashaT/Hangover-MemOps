@@ -56,6 +56,13 @@ _store_lock = asyncio.Lock()
 # (_read_graph_data, _recall_text) assume it is already held — do NOT nest.
 _graph_lock = asyncio.Lock()
 
+# In-memory cache for the (expensive, LLM-backed) proactive insights. Computed
+# once at startup and only recomputed after a new incident is ingested or a
+# status change — see get_insights() / invalidate_insights().
+_insights_cache: dict | None = None
+_insights_dirty: bool = True   # start dirty so the first read (startup warm) computes
+_insights_lock = asyncio.Lock()
+
 
 # ---------------------------------------------------------------------------
 # Structured store helpers (no LLM, no Cognee — plain JSON on disk)
@@ -168,6 +175,8 @@ async def ingest_incident(incident: dict) -> dict:
         records = [r for r in records if r.get("incident_id") != record["incident_id"]]
         records.append(record)
         _save_store(records)
+    # A new incident changes what the insights would say → refresh on next read.
+    invalidate_insights()
     return record
 
 
@@ -296,6 +305,9 @@ async def resolve_incident(incident_id: str) -> dict | None:
         rec["outcome"] = rec.get("outcome") or "resolved"
         rec["resolved_at"] = _now_iso()
         _save_store(records)
+
+    # A status change alters what the insights would say → refresh on next read.
+    invalidate_insights()
 
     service = rec.get("service_affected")
 
@@ -526,9 +538,9 @@ async def _recall_text(prompt: str) -> str:
     return ""
 
 
-async def get_insights() -> dict:
-    """Generate 2-3 proactive insights from a recall across the graph. Retries
-    once with a rephrased question if the first answer is degenerate."""
+async def _compute_insights() -> dict:
+    """Run the actual LLM recall(s) that produce the insights. Expensive — this
+    is the call we cache so it doesn't fire on every page refresh."""
     async with _graph_lock:
         answer = await _recall_text(_INSIGHTS_PROMPT)
         if _is_degenerate(answer):
@@ -537,7 +549,41 @@ async def get_insights() -> dict:
         "insights": _split_insights(answer),
         "raw": answer,
         "source": "cognee-graph",
+        "generated_at": _now_iso(),
     }
+
+
+async def get_insights() -> dict:
+    """Return proactive insights from an in-memory cache.
+
+    recall() is expensive, so we compute the insights ONCE (at startup, and
+    again only after the graph's meaning changes — a new incident ingested or a
+    status change). Every GET /api/insights just returns the cached result, so
+    page refreshes cost nothing. The cache is recomputed lazily on the first
+    request after it's been marked dirty, guarded by a lock so concurrent
+    requests don't all fire recall() at once.
+    """
+    global _insights_cache, _insights_dirty
+
+    if _insights_cache is not None and not _insights_dirty:
+        return {**_insights_cache, "cached": True}
+
+    async with _insights_lock:
+        # Re-check inside the lock: another coroutine may have just computed it.
+        if _insights_cache is not None and not _insights_dirty:
+            return {**_insights_cache, "cached": True}
+        _insights_cache = await _compute_insights()
+        _insights_dirty = False
+        return {**_insights_cache, "cached": False}
+
+
+def invalidate_insights() -> None:
+    """Mark the insights cache stale. Called when a new incident is ingested or
+    an incident's status changes — the only events that alter what the insights
+    would say. The next GET /api/insights recomputes once; intervening reads
+    keep serving the last good result."""
+    global _insights_dirty
+    _insights_dirty = True
 
 
 def _split_insights(text: str) -> list[str]:
