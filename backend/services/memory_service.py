@@ -48,6 +48,14 @@ _DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
 _STORE_PATH = os.path.join(_DATA_DIR, "incidents_store.json")
 _store_lock = asyncio.Lock()
 
+# Serializes ALL graph-touching Cognee operations (remember / recall / improve /
+# direct graph reads). Ladybug is a single-writer embedded DB with one file
+# lock; two concurrent requests in this one server process (e.g. the dashboard
+# firing /api/graph and /api/insights at once) would otherwise collide with
+# "Lock is held by PID ...". Public entry points acquire this; internal helpers
+# (_read_graph_data, _recall_text) assume it is already held — do NOT nest.
+_graph_lock = asyncio.Lock()
+
 
 # ---------------------------------------------------------------------------
 # Structured store helpers (no LLM, no Cognee — plain JSON on disk)
@@ -145,7 +153,8 @@ async def ingest_incident(incident: dict) -> dict:
     """Ingest a single incident into BOTH the Cognee graph and the structured
     store. Returns the stored record (with status metadata)."""
     text = _format_incident(incident)
-    await cognee.remember(text, dataset_name=INCIDENTS_DATASET)
+    async with _graph_lock:
+        await cognee.remember(text, dataset_name=INCIDENTS_DATASET)
 
     async with _store_lock:
         records = _load_store()
@@ -206,7 +215,8 @@ async def recall_for_alert(alert_text: str) -> dict:
 
     Uses GRAPH_COMPLETION (a single LLM call reasoning over retrieved graph
     triplets) rather than the auto-routed CONTEXT_EXTENSION mode (5+ calls)."""
-    results = await cognee.recall(alert_text, query_type=SearchType.GRAPH_COMPLETION)
+    async with _graph_lock:
+        results = await cognee.recall(alert_text, query_type=SearchType.GRAPH_COMPLETION)
 
     answer = ""
     if results:
@@ -215,30 +225,54 @@ async def recall_for_alert(alert_text: str) -> dict:
 
     # Surface related historical incidents from the structured store by simple
     # service/keyword overlap so the frontend can render incident cards even
-    # though the LLM answer is free text. Free (no LLM).
-    related = _related_incidents_for_text(alert_text)
+    # though the LLM answer is free text. Free (no LLM). Also derive a real
+    # confidence score from how strongly the top match overlaps the alert.
+    related, confidence = _related_incidents_for_text(alert_text)
 
     return {
         "alert": alert_text,
+        "confidence": confidence,          # 0-100, grounded in match strength
         "suggested_fix": answer.strip(),
         "historical_context": related,
         "source": "cognee-graph",
     }
 
 
-def _related_incidents_for_text(text: str, limit: int = 5) -> list[dict]:
+def _related_incidents_for_text(text: str, limit: int = 5) -> tuple[list[dict], int]:
     """Lightweight, LLM-free relevance: rank stored incidents by token overlap
-    with the alert text (service name, alert name, error log keywords)."""
-    tokens = {t for t in _tokenize(text) if len(t) > 2}
+    with the alert text (service name, alert name, error log keywords).
+
+    Returns (cards, confidence). Each card carries a `match_score` (0-100).
+    `confidence` reflects the best match: the fraction of the alert's meaningful
+    tokens that we've already seen in a past incident, nudged up when several
+    incidents corroborate. Real signal, not a fabricated number.
+    """
+    alert_tokens = {t for t in _tokenize(text) if len(t) > 2}
+    denom = max(1, len(alert_tokens))
     scored = []
     for r in _load_store():
         hay = " ".join(str(r.get(f, "")) for f in
                        ("service_affected", "alert_name", "error_log", "fix_applied"))
-        overlap = len(tokens & set(_tokenize(hay)))
+        overlap = len(alert_tokens & set(_tokenize(hay)))
         if overlap:
             scored.append((overlap, r))
     scored.sort(key=lambda x: (x[0], x[1].get("timestamp", "")), reverse=True)
-    return [_basic_view(r) for _, r in scored[:limit]]
+
+    top = scored[:limit]
+    cards = []
+    for overlap, r in top:
+        card = _basic_view(r)
+        card["match_score"] = round(100 * overlap / denom)
+        cards.append(card)
+
+    if not scored:
+        confidence = 0
+    else:
+        best_overlap = scored[0][0]
+        base = 100 * best_overlap / denom
+        corroboration = min(15, 5 * (len(scored) - 1))  # more matches → more sure
+        confidence = int(min(96, round(base + corroboration)))
+    return cards, confidence
 
 
 def _tokenize(text: str) -> list[str]:
@@ -266,14 +300,16 @@ async def resolve_incident(incident_id: str) -> dict | None:
     service = rec.get("service_affected")
 
     # Snapshot the graph before/after enrichment so we can report the delta.
-    before = await _graph_metrics()
-    try:
-        await cognee.improve(dataset=INCIDENTS_DATASET)
-        enrichment_ok = True
-    except Exception as e:  # never let improve() failure block the resolve
-        enrichment_ok = False
-        _last_improve_error = str(e)
-    after = await _graph_metrics()
+    # Whole block under the graph lock so a concurrent read can't grab the
+    # ladybug file lock mid-improve.
+    async with _graph_lock:
+        before = await _graph_metrics()
+        try:
+            await cognee.improve(dataset=INCIDENTS_DATASET)
+            enrichment_ok = True
+        except Exception:  # never let improve() failure block the resolve
+            enrichment_ok = False
+        after = await _graph_metrics()
 
     # The connections being reinforced: other incidents on the same service.
     related = [
@@ -369,6 +405,10 @@ _GROUP_INDEX = {
 }
 
 
+import re as _re
+_INCIDENT_ID_RE = _re.compile(r"Incident ID\s*:\s*(INC-\d{4}-\d+)", _re.IGNORECASE)
+
+
 def _node_label(attrs: dict) -> str:
     name = (attrs.get("name") or "").strip()
     if name:
@@ -385,21 +425,56 @@ async def _graph_metrics() -> dict:
 
 
 async def get_graph() -> dict:
-    """Return the incidents knowledge graph as D3.js-ready nodes + links."""
-    raw_nodes, raw_edges = await _read_graph_data()
+    """Return the incidents knowledge graph as D3.js-ready nodes + links.
+
+    Real Cognee graph data, enriched so the frontend can render an
+    incident-centric view: each DocumentChunk node that represents an incident
+    is tagged with node_kind='incident', its parsed incident_id, and the
+    severity/service/alert joined from the structured store. All other Cognee
+    nodes (entities, types, docs) get node_kind='entity' (rendered neutral/gray).
+    """
+    async with _graph_lock:
+        raw_nodes, raw_edges = await _read_graph_data()
+
+    # Build an incident_id -> record lookup once (LLM-free store read).
+    store_by_id = {r.get("incident_id"): r for r in _load_store()}
 
     type_counts: dict[str, int] = {}
+    kind_counts = {"incident": 0, "entity": 0}
     nodes = []
     for nid, attrs in raw_nodes:
         attrs = attrs or {}
         ntype = attrs.get("type", "node")
         type_counts[ntype] = type_counts.get(ntype, 0) + 1
-        nodes.append({
+
+        node = {
             "id": str(nid),
             "label": _node_label(attrs),
             "type": ntype,
             "group": _GROUP_INDEX.get(ntype, 0),
-        })
+            "node_kind": "entity",
+            "incident_id": None,
+            "severity": None,
+            "service": None,
+        }
+
+        # A DocumentChunk whose text carries an "Incident ID : INC-..." IS an
+        # incident node — parse the id and enrich from the store.
+        if ntype == "DocumentChunk":
+            m = _INCIDENT_ID_RE.search(attrs.get("text") or attrs.get("name") or "")
+            if m:
+                iid = m.group(1)
+                rec = store_by_id.get(iid, {})
+                node["node_kind"] = "incident"
+                node["incident_id"] = iid
+                node["severity"] = rec.get("severity")
+                node["service"] = rec.get("service_affected")
+                node["label"] = (
+                    f"{iid} · {rec.get('service_affected') or '?'}"
+                    if rec else iid
+                )
+        kind_counts[node["node_kind"]] += 1
+        nodes.append(node)
 
     links = []
     for edge in raw_edges:
@@ -414,6 +489,8 @@ async def get_graph() -> dict:
             "node_count": len(nodes),
             "edge_count": len(links),
             "type_counts": type_counts,
+            "incident_nodes": kind_counts["incident"],
+            "entity_nodes": kind_counts["entity"],
         },
     }
 
@@ -452,9 +529,10 @@ async def _recall_text(prompt: str) -> str:
 async def get_insights() -> dict:
     """Generate 2-3 proactive insights from a recall across the graph. Retries
     once with a rephrased question if the first answer is degenerate."""
-    answer = await _recall_text(_INSIGHTS_PROMPT)
-    if _is_degenerate(answer):
-        answer = await _recall_text(_INSIGHTS_FALLBACK_PROMPT)
+    async with _graph_lock:
+        answer = await _recall_text(_INSIGHTS_PROMPT)
+        if _is_degenerate(answer):
+            answer = await _recall_text(_INSIGHTS_FALLBACK_PROMPT)
     return {
         "insights": _split_insights(answer),
         "raw": answer,

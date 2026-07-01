@@ -75,5 +75,39 @@ remember()/improve() in the server process with "Lock is held by PID …".
 - [x] backend/data/ gitignored (runtime state, regenerable)
 - [x] Phase 3 LLM spend ≈ <$0.02 (cumulative well under the $2 cap)
 
-## Phase 4 — (pending)
+## Phase 4 — React Frontend (Vite + Tailwind + D3) ✅
+Three screens, React Router, all data from the live FastAPI backend
+(http://localhost:8000). No mock data. Dark "Recall" theme.
+
+- [x] frontend/ scaffolded with Vite + React 19; Tailwind v3; react-router-dom v7; d3 v7
+- [x] src/api.js — single backend client (VITE_API_BASE, default :8000); shared severity palette
+- [x] Top bar — Recall logo + Dashboard / New Alert links (React Router)
+- [x] Screen 1 Dashboard (/):
+  - left: fleet stats (total / open / resolved / critical) from GET /api/incidents + recent list
+  - center: **D3 force graph from GET /api/graph** — incident nodes colored by severity
+    (red/orange/yellow/green), entity nodes gray, edges, hover tooltip, click → detail, zoom/pan, legend
+  - right: 3 proactive insights from GET /api/insights (bold markdown rendered)
+- [x] Screen 2 New Alert (/alert): textarea → POST /api/alerts; two columns (raw | analysis);
+  match-confidence gauge, ranked historical incident cards (% match + severity), suggested fix, Approve/Reject
+- [x] Screen 3 Incident Detail (/incidents/:id): full incident (service/severity/date/engineer/
+  resolution/error log/slack/jira/commits/fix/outcome); status panel; **Approve Fix → PATCH resolve →
+  improve() → animated green "Memory reinforced" (memify) card** showing graph delta + reinforced connections
+
+**Backend touch-ups for the frontend (still behind memory_service):**
+- [x] GET /api/graph enriched: incident nodes carry node_kind/incident_id/severity/service (parsed from
+  chunk text, joined to store) so the graph can color by severity and route clicks
+- [x] POST /api/alerts returns a real `confidence` (0-100) + per-card `match_score` from overlap strength
+- [x] **Concurrency fix:** added an async `_graph_lock` serializing all graph-touching Cognee ops
+  (remember/recall/improve/graph read). The dashboard fires /api/graph + /api/insights together; without
+  the lock they collided on the single-writer ladybug file ("Lock is held by PID …" → 500). Dashboard also
+  chains insights after the graph so the graph stays instant.
+
+**Verified by headless render (Playwright/Chromium):** dashboard graph draws 166 circles / 18
+severity-colored incident nodes with real IDs; detail + memify + alert-analysis flows all render;
+0 console errors; 0 backend 500s. Screens screenshotted and visually reviewed.
+
+- Node LTS installed to ~/.local (no root); frontend deps via npm. `npm run dev` (5173) + backend (8000).
+- Phase 4 LLM spend negligible (~a few recalls for insights/alerts during render tests).
+
+## Phase 5 — (pending)
 - [ ] TBD
