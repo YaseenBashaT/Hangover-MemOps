@@ -1,0 +1,24 @@
+# Environment / secrets — never commit
+.env
+.env.*
+*.env
+backend/.env
+
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Cognee internal storage
+.cognee_system/
+.data_storage/
+.cognee_cache/
+
+# Runtime structured store (regenerable via memory_service.bootstrap_store / seed)
+backend/data/
+
+# Logs
+*.log
