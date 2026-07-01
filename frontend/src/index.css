@@ -48,3 +48,12 @@ body {
 .animate-glow {
   animation: pulseGlow 1.6s ease-in-out 2;
 }
+
+/* pulsing halo behind reinforced graph nodes (the "memory got stronger" cue) */
+@keyframes haloPulse {
+  0%, 100% { opacity: 0.15; stroke-width: 2; }
+  50% { opacity: 0.9; stroke-width: 4; }
+}
+.graph-halo {
+  animation: haloPulse 1.4s ease-in-out infinite;
+}

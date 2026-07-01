@@ -122,5 +122,31 @@ recall() is the expensive part; it must not fire on every page refresh.
   one `cached:false` recompute (new timestamp), then cached again. Frontend issued exactly 1
   /api/insights request across 3 Dashboard↔Alert round-trips.
 
-## Phase 5 — (pending)
+## Phase 5 — Full demo loop, end to end ✅
+The complete 90-second demo path works cleanly.
+
+- [x] Clean data reset to exactly **17 incidents** (removed the stray INC-2025-0930 from testing); `reseed17.py` wipes graph+store and re-ingests the 17 seed incidents.
+- [x] **New Alert fully working:** textarea → POST /api/alerts. Right column shows a circular
+  **match-confidence ring** (ScoreRing), ranked historical cards with **dates + Jira IDs + the fix
+  that worked**, and a suggested-fix card. Approve Fix / Reject.
+- [x] Backend: /api/alerts cards enriched with `fix_applied` + `jira_id`; real `confidence` + `match_score`.
+- [x] **Approve Fix** resolves the most relevant historical incident (top card) → PATCH
+  /api/incidents/{id}/resolve (loading spinner while in flight). **Reject** resets the form.
+- [x] **The memify moment (signature):** on resolve, a green "Memory reinforced" panel slides in
+  (nodes/edges, reinforced connections), then auto-navigates to the dashboard where the reinforced
+  nodes render **brighter/larger with pulsing green halos and thick green edges** — you watch the
+  memory get stronger. Reinforced ids passed via router state; GraphView `highlightIds`.
+- [x] **Incident Detail fully working:** all fields (service/severity/date/engineer/resolution/error
+  log/slack/jira/commits/fix/outcome/status); right panel **Related Incidents** (same-service
+  connections, clickable); status **dropdown** with all options (selecting Resolved triggers resolve).
+- [x] **Autonomous feel:** "Graph last analyzed <time>" with a live green pulse under the insights
+  panel (uses insights `generated_at`).
+- [x] **End-to-end demo path VERIFIED (headless Playwright, `demo_e2e.mjs`):** dashboard shows 17
+  incident nodes → insight readable + last-analyzed cue → New Alert with the exact demo text →
+  Analyze → all three payments-api incidents (INC-2024-1014 / INC-2025-0203 / INC-2025-0819) with the
+  evolved fix (pool 10→50 → PgBouncer → dynamic autoscaling) → Approve Fix → green memify panel →
+  dashboard graph highlights 4 reinforced nodes (green halos/edges) → click a payments-api node →
+  full incident detail. **0 console errors, 0 backend 500s.**
+
+## Phase 6 — (pending)
 - [ ] TBD

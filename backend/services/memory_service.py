@@ -272,6 +272,11 @@ def _related_incidents_for_text(text: str, limit: int = 5) -> tuple[list[dict], 
     for overlap, r in top:
         card = _basic_view(r)
         card["match_score"] = round(100 * overlap / denom)
+        # Cards show dates + the fix that worked, so the engineer sees the
+        # evolution of past resolutions at a glance.
+        card["fix_applied"] = r.get("fix_applied")
+        jira = r.get("jira_ticket") or {}
+        card["jira_id"] = jira.get("id")
         cards.append(card)
 
     if not scored:
