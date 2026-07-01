@@ -1,0 +1,7 @@
+# MemOps backend dependencies (Python 3.12+).
+# cognee pulls in litellm, fastembed, and the ladybug graph store transitively.
+cognee==1.2.2
+fastapi==0.138.2
+uvicorn==0.49.0
+python-dotenv==1.0.1
+httpx==0.28.1

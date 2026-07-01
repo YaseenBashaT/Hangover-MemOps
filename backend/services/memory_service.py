@@ -223,20 +223,38 @@ async def recall_for_alert(alert_text: str) -> dict:
     clean, frontend-ready structure: historical context + a suggested fix.
 
     Uses GRAPH_COMPLETION (a single LLM call reasoning over retrieved graph
-    triplets) rather than the auto-routed CONTEXT_EXTENSION mode (5+ calls)."""
-    async with _graph_lock:
-        results = await cognee.recall(alert_text, query_type=SearchType.GRAPH_COMPLETION)
+    triplets) rather than the auto-routed CONTEXT_EXTENSION mode (5+ calls).
 
-    answer = ""
-    if results:
-        r = results[0]
-        answer = getattr(r, "text", None) or getattr(r, "answer", None) or str(r)
-
-    # Surface related historical incidents from the structured store by simple
-    # service/keyword overlap so the frontend can render incident cards even
-    # though the LLM answer is free text. Free (no LLM). Also derive a real
-    # confidence score from how strongly the top match overlaps the alert.
+    The alert text is wrapped in a directive question so the model returns an
+    actual fix instead of just acknowledging the statement ("Got it."). If the
+    answer still comes back degenerate, we retry once and then, as a last
+    resort, synthesize a fix from the closest past incident."""
+    # Related incidents first (free, no LLM) — also used for the fallback fix.
     related, confidence = _related_incidents_for_text(alert_text)
+
+    primary = (
+        f'A new production alert just fired: "{alert_text}". Based on the past '
+        "incidents in memory, what is the most likely fix? Reference the specific "
+        "past incident IDs that resolved this before and describe the fix that worked."
+    )
+    fallback = (
+        f'For this alert: "{alert_text}", name the past incidents on the affected '
+        "service and the fix that finally worked, citing the incident IDs."
+    )
+
+    async with _graph_lock:
+        answer = await _recall_text(primary)
+        if _is_degenerate(answer):
+            answer = await _recall_text(fallback)
+
+    # Last resort: never show a contentless suggestion in the demo — build one
+    # from the closest matching past incident's fix.
+    if _is_degenerate(answer) and related:
+        top = related[0]
+        answer = (
+            f"Closest past incident is {top['incident_id']} on {top['service_affected']}. "
+            f"That was resolved by: {top.get('fix_applied') or 'the recorded fix'}."
+        )
 
     return {
         "alert": alert_text,
@@ -520,13 +538,18 @@ async def get_graph() -> dict:
 # because the latter occasionally makes the model just acknowledge ("Got it.")
 # instead of answering. A fallback rephrasing is tried if the answer is degenerate.
 _INSIGHTS_PROMPT = (
-    "Looking across all past incidents, what are the 2 or 3 most important recurring "
-    "problems or services most at risk of breaking again? For each one, name the "
-    "specific incidents or services involved and what permanent fix is still needed."
+    "Give exactly 3 short proactive insights across all past incidents. Put each on "
+    "its own numbered line in this exact shape: a bold headline wrapped in double "
+    "asterisks that names the service or failure pattern, then ONE sentence of "
+    "evidence citing the real incident IDs. Two short sentences maximum per insight, "
+    "no more than that. "
+    "Example: '1. **payments-api connection pool keeps exhausting.** Seen in "
+    "INC-2024-1014, INC-2025-0203 and INC-2025-0819, now fixed with dynamic pool autoscaling.'"
 )
 _INSIGHTS_FALLBACK_PROMPT = (
-    "Which services have had repeated incidents, and what recurring root cause links "
-    "them? Reference the specific incident or ticket IDs and recommend a permanent fix."
+    "List 3 recurring incident patterns. For each, write a bold headline in double "
+    "asterisks naming the service, then one sentence citing the specific incident or "
+    "ticket IDs involved. Keep each to two short sentences at most."
 )
 
 
@@ -611,7 +634,32 @@ def _split_insights(text: str) -> list[str]:
     if not items:
         # Last resort: paragraph split.
         items = [p.strip() for p in re.split(r"\n{2,}", text) if p.strip()]
+    items = [_trim_insight(i) for i in items]
     return items[:3] if items else ([text] if text else [])
+
+
+def _trim_insight(text: str, max_sentences: int = 2, max_chars: int = 240) -> str:
+    """Keep an insight short: at most two sentences (a bold headline + one
+    evidence sentence), capped in length. The bold headline's own period does
+    not count as a boundary, so 'headline. + evidence.' reads as two sentences."""
+    import re
+    text = re.sub(r"\s+", " ", text).strip()
+
+    # Protect the bold headline (period inside ** ** is not a sentence break).
+    m = re.match(r"^(\*\*.+?\*\*[.:]?\s*)(.*)$", text)
+    head, rest = (m.group(1).strip(), m.group(2).strip()) if m else ("", text)
+
+    # Take up to (max_sentences - 1) sentences from the evidence part.
+    ev_sentences = re.findall(r".+?[.!?](?:\s|$)", rest) or ([rest] if rest else [])
+    keep = ev_sentences[: max(1, max_sentences - (1 if head else 0))]
+    out = (head + " " + "".join(keep)).strip() if head else "".join(keep).strip()
+    out = out or text
+
+    if len(out) > max_chars:
+        cut = out[:max_chars]
+        idx = max(cut.rfind(". "), cut.rfind("! "), cut.rfind("? "))
+        out = cut[: idx + 1].strip() if idx > 40 else cut.strip().rstrip(",;:") + "…"
+    return out
 
 
 # ---------------------------------------------------------------------------

@@ -148,5 +148,33 @@ The complete 90-second demo path works cleanly.
   dashboard graph highlights 4 reinforced nodes (green halos/edges) → click a payments-api node →
   full incident detail. **0 console errors, 0 backend 500s.**
 
-## Phase 6 — (pending)
-- [ ] TBD
+## Phase 6 — Final polish before submission ✅
+The last pass before the hackathon submission: tighten the insight copy, polish every
+screen, and write a README a human would actually write.
+
+- [x] **Insights trimmed to 2 short sentences.** `_INSIGHTS_PROMPT` /
+  `_INSIGHTS_FALLBACK_PROMPT` now demand a bold headline naming the service/pattern plus
+  ONE evidence sentence that cites the real incident IDs, two sentences max. Added a
+  `_trim_insight()` safety net (protects the bold-headline period, keeps ≤2 sentences,
+  caps length at a sentence boundary) applied in `_split_insights`. No more paragraph-long
+  insights.
+- [x] **Fixed the "Got it." degenerate alert answer.** `recall_for_alert()` now asks a
+  directive question ("what is the most likely fix? Reference the specific past incident
+  IDs…"), retries with a second phrasing if the first answer is degenerate, and if both
+  fail synthesizes an answer from the top related incident's recorded fix. Verified 3×
+  (435 / 387 / 242-char answers, no "Got it.").
+- [x] **UI polish at 1920x1080** across Dashboard, New Alert (before + after analysis),
+  and Incident Detail — spacing, graph legend clarity, memify green-panel visibility.
+  Captured with `frontend/polish_shots.mjs` (Playwright, 1920x1080) and reviewed.
+- [x] **README.md rewritten** in a strict human style (banned-word/no-em-dash/no-rule-of-
+  three/vary-sentence-length rules). Sections: The problem (3am, the engineer who left) ·
+  What MemOps does · **How Cognee powers the memory** (all four operations detailed —
+  remember/recall/improve/forget — the judging criterion) · The demo (numbered) · Tech
+  stack · Setup (exact commands) · AI declaration (Claude Code used throughout).
+- [x] **Self-review pass:** mechanical grep (no banned words, em dashes, emoji, or banned
+  sentence starts) + manual "what makes this obviously AI generated?" read — rewrote a
+  triad and an AI-transition phrase that failed it.
+- [x] `requirements.txt` added (cognee==1.2.2, fastapi, uvicorn, python-dotenv, httpx) so
+  the Setup steps actually run from a clean clone.
+- [x] Cumulative LLM spend still well under the $2 cap (no new seeding; a handful of
+  verification recalls).
