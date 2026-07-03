@@ -1,3 +1,10 @@
+---
+title: memops-api
+emoji: 🧠
+sdk: docker
+app_port: 7860
+---
+
 # MemOps
 
 MemOps remembers how your team fixed production incidents, so the next person who gets paged does not start from nothing.

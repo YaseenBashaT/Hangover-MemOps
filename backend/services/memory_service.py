@@ -13,8 +13,10 @@ Two sources of truth, by design:
 """
 
 import os
+import sys
 import json
 import asyncio
+import traceback
 from datetime import datetime, timezone
 
 import cognee
@@ -25,14 +27,150 @@ from cognee.modules.search.types.SearchType import SearchType
 # Cognee configuration (env-driven; Groq defaults)
 # ---------------------------------------------------------------------------
 
+def _mask(secret: str | None) -> str:
+    """Render-safe fingerprint of a secret: never logs the value, but shows
+    whether it's present and roughly which key it is."""
+    if not secret:
+        return "MISSING"
+    return f"present(len={len(secret)}, ...{secret[-4:]})"
+
+
+def llm_key_info() -> tuple[str | None, str]:
+    """Return (key, source-label). Checks LLM_API_KEY first, then GROQ_API_KEY."""
+    if os.getenv("LLM_API_KEY"):
+        return os.getenv("LLM_API_KEY"), "LLM_API_KEY"
+    if os.getenv("GROQ_API_KEY"):
+        return os.getenv("GROQ_API_KEY"), "GROQ_API_KEY"
+    return None, "none"
+
+
 def _configure_cognee() -> None:
-    cognee.config.set_llm_provider(os.getenv("LLM_PROVIDER", "custom"))
-    cognee.config.set_llm_model(os.getenv("LLM_MODEL", "openai/llama-3.3-70b-versatile"))
-    cognee.config.set_llm_endpoint(os.getenv("LLM_ENDPOINT", "https://api.groq.com/openai/v1"))
-    cognee.config.set_llm_api_key(os.getenv("LLM_API_KEY"))
-    cognee.config.set_embedding_provider("fastembed")
-    cognee.config.set_embedding_model("BAAI/bge-small-en-v1.5")
-    cognee.config.set_embedding_dimensions(384)
+    # On a host where only certain paths are writable (e.g. HuggingFace Spaces,
+    # where writes must go to /tmp), point Cognee's databases + ingested-data
+    # storage at a writable directory. Cognee otherwise defaults to a path inside
+    # its own site-packages install, which isn't writable there. Set via
+    # COGNEE_SYSTEM_ROOT; left unset locally so the default location is used.
+    system_root = os.getenv("COGNEE_SYSTEM_ROOT")
+    if system_root:
+        os.makedirs(system_root, exist_ok=True)
+        cognee.config.system_root_directory(system_root)
+        cognee.config.data_root_directory(os.path.join(system_root, "data"))
+        print(f"[cognee] system_root -> {system_root}", flush=True)
+
+    key, source = llm_key_info()
+    provider = os.getenv("LLM_PROVIDER", "custom")
+    model = os.getenv("LLM_MODEL", "openai/llama-3.3-70b-versatile")
+    endpoint = os.getenv("LLM_ENDPOINT", "https://api.groq.com/openai/v1")
+    cognee.config.set_llm_provider(provider)
+    cognee.config.set_llm_model(model)
+    cognee.config.set_llm_endpoint(endpoint)
+    cognee.config.set_llm_api_key(key)
+
+    # Embeddings run on HuggingFace's hosted inference API (via litellm) instead
+    # of local fastembed. This drops ~200 MB of onnxruntime + model weights from
+    # the process, which is what pushed the free 512 MB Render instance over its
+    # memory limit. all-MiniLM-L6-v2 is 384-dim, same as the old bge-small model,
+    # so nothing downstream that assumed 384 dims has to change.
+    emb_provider = os.getenv("EMBEDDING_PROVIDER", "huggingface")
+    emb_model = os.getenv(
+        "EMBEDDING_MODEL", "huggingface/sentence-transformers/all-MiniLM-L6-v2"
+    )
+    emb_dims = int(os.getenv("EMBEDDING_DIMENSIONS", "384"))
+    emb_key = os.getenv("HF_TOKEN") or os.getenv("EMBEDDING_API_KEY")
+    cognee.config.set_embedding_provider(emb_provider)
+    cognee.config.set_embedding_model(emb_model)
+    cognee.config.set_embedding_dimensions(emb_dims)
+    if emb_key:
+        cognee.config.set_embedding_api_key(emb_key)
+    emb_endpoint = os.getenv("EMBEDDING_ENDPOINT")
+    if emb_endpoint:
+        cognee.config.set_embedding_endpoint(emb_endpoint)
+
+    # HuggingFace's embedding route doesn't accept the `dimensions` param that
+    # cognee passes through litellm, so let litellm drop provider-unsupported
+    # params instead of erroring. all-MiniLM-L6-v2 is natively 384-dim, so
+    # dropping the (redundant) dimensions hint changes nothing about the output.
+    import litellm
+    litellm.drop_params = True
+
+    # litellm 1.83.7 cannot call HF feature-extraction embeddings correctly (it
+    # sends a sentence-similarity payload), so for the huggingface provider we
+    # override cognee's embed call to hit HF's inference router directly.
+    if emb_provider.lower() == "huggingface":
+        _install_hf_embedding_patch()
+
+    # Loud, secret-safe diagnostic so Render logs immediately reveal a bad/missing
+    # key or endpoint (the usual reason seeding fails on a fresh instance).
+    print(
+        f"[cognee] configured llm_provider={provider} llm_model={model} "
+        f"llm_endpoint={endpoint} llm_api_key={_mask(key)} (source={source})",
+        flush=True,
+    )
+    print(
+        f"[cognee] embeddings provider={emb_provider} model={emb_model} "
+        f"dims={emb_dims} hf_token={_mask(emb_key)}",
+        flush=True,
+    )
+
+
+def _install_hf_embedding_patch() -> None:
+    """Make cognee's embedding calls go straight to HuggingFace's inference
+    router for the `huggingface` provider.
+
+    Why: litellm (which cognee uses under the hood) formats HF embedding requests
+    as a sentence-similarity call, which the feature-extraction pipeline rejects
+    ("Model not supported by provider hf-inference" / unexpected 'source_sentence'
+    argument). The raw router endpoint works fine with a plain {"inputs": [...]}
+    body, returning mean-pooled sentence vectors: a flat [dim] list for a single
+    string, or [n][dim] for a list. We patch `embed_text` on the engine CLASS so
+    the override applies no matter when cognee builds its (singleton) engine, and
+    only take over when the provider is huggingface — any other provider falls
+    through to cognee's original implementation untouched.
+    """
+    from cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine import (
+        LiteLLMEmbeddingEngine,
+    )
+    import httpx as _httpx
+
+    if getattr(LiteLLMEmbeddingEngine, "_hf_patched", False):
+        return
+    _orig_embed = LiteLLMEmbeddingEngine.embed_text
+
+    async def _hf_embed_text(self, text):
+        if str(getattr(self, "provider", "")).lower() != "huggingface":
+            return await _orig_embed(self, text)
+        inputs = [text] if isinstance(text, str) else list(text)
+        # HF errors on empty strings; give it a space so indexes still line up.
+        inputs = [t if (t and t.strip()) else " " for t in inputs]
+        repo = self.model.split("huggingface/", 1)[-1]
+        url = (
+            f"https://router.huggingface.co/hf-inference/models/{repo}"
+            "/pipeline/feature-extraction"
+        )
+        headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
+        last_err = None
+        for attempt in range(5):
+            try:
+                async with _httpx.AsyncClient(timeout=30) as client:
+                    resp = await client.post(url, headers=headers, json={"inputs": inputs})
+                # 429 = rate limited, 503 = model still loading — back off and retry.
+                if resp.status_code in (429, 503):
+                    last_err = f"{resp.status_code}: {resp.text[:120]}"
+                    await asyncio.sleep(2 * (attempt + 1))
+                    continue
+                resp.raise_for_status()
+                data = resp.json()
+                if data and isinstance(data[0], (int, float)):
+                    data = [data]  # single flat vector -> list of one vector
+                return data
+            except _httpx.HTTPError as e:
+                last_err = str(e)
+                await asyncio.sleep(2 * (attempt + 1))
+        raise RuntimeError(f"HF embedding request failed after retries: {last_err}")
+
+    LiteLLMEmbeddingEngine.embed_text = _hf_embed_text
+    LiteLLMEmbeddingEngine._hf_patched = True
+    print("[cognee] HF feature-extraction embedding patch installed", flush=True)
 
 
 _configure_cognee()
@@ -43,9 +181,18 @@ _configure_cognee()
 # Recall is then one graph traversal instead of one LLM call per incident.
 INCIDENTS_DATASET = "incidents"
 
-# Structured store lives next to this file's package, under backend/data/.
-_DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
+# Project root (holds seed.py) and the structured store under backend/data/.
+# The store dir is relocatable via MEMOPS_DATA_DIR so hosts that only allow
+# writes to certain paths (e.g. HuggingFace Spaces → /tmp) can redirect it.
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+_DATA_DIR = os.getenv("MEMOPS_DATA_DIR") or os.path.join(
+    os.path.dirname(os.path.dirname(__file__)), "data"
+)
 _STORE_PATH = os.path.join(_DATA_DIR, "incidents_store.json")
+# The computed proactive insights are persisted here so they survive a server
+# restart — otherwise every restart would recompute them and, because the LLM
+# recall is non-deterministic, the dashboard would show different insights.
+_INSIGHTS_PATH = os.path.join(_DATA_DIR, "insights_cache.json")
 _store_lock = asyncio.Lock()
 
 # Serializes ALL graph-touching Cognee operations (remember / recall / improve /
@@ -56,11 +203,16 @@ _store_lock = asyncio.Lock()
 # (_read_graph_data, _recall_text) assume it is already held — do NOT nest.
 _graph_lock = asyncio.Lock()
 
-# In-memory cache for the (expensive, LLM-backed) proactive insights. Computed
-# once at startup and only recomputed after a new incident is ingested or a
-# status change — see get_insights() / invalidate_insights().
+# Cache for the (expensive, LLM-backed) proactive insights. Backed by a file on
+# disk (_INSIGHTS_PATH) so it persists across process restarts, with this
+# in-memory copy as a fast path. Computed once, then reused until a new incident
+# is ingested or a status changes — see get_insights() / invalidate_insights().
+# Validity is owned by the file: a valid computed result means the file exists;
+# invalidate deletes it. `_insights_dirty` only forces a recompute within the
+# process after an in-process invalidate, so it starts False (a cold start with
+# an existing file should LOAD it, not recompute).
 _insights_cache: dict | None = None
-_insights_dirty: bool = True   # start dirty so the first read (startup warm) computes
+_insights_dirty: bool = False
 _insights_lock = asyncio.Lock()
 
 
@@ -178,6 +330,128 @@ async def ingest_incident(incident: dict) -> dict:
     # A new incident changes what the insights would say → refresh on next read.
     invalidate_insights()
     return record
+
+
+async def count_incidents() -> int:
+    """How many incidents are currently in memory. The structured store is
+    written in lockstep with every graph ingest, so an empty store means an
+    empty incidents graph — a cheap, lock-free proxy for the graph node count."""
+    return len(_load_store())
+
+
+async def seed_if_empty() -> dict:
+    """Ensure the graph is populated. On a fresh instance — e.g. Render's
+    ephemeral filesystem after a deploy — both the Cognee graph and the store
+    start empty. If there are zero incidents, ingest the full seed set so the
+    dashboard never comes up blank. Idempotent: a no-op when incidents exist.
+
+    Logs every step to stdout (visible in Render logs) and, if ingest fails,
+    re-raises with the incident id so the real error is not swallowed."""
+    existing = await count_incidents()
+    print(f"[seed] store currently holds {existing} incident(s)", flush=True)
+    if existing > 0:
+        print("[seed] already populated -> skipping", flush=True)
+        return {"seeded": False, "count": existing}
+
+    key, source = llm_key_info()
+    if not key:
+        # Seeding calls the LLM via Cognee; without a key every ingest will fail.
+        raise RuntimeError(
+            "No LLM API key found in the environment (checked LLM_API_KEY and "
+            "GROQ_API_KEY). Set it in the Render dashboard, then redeploy."
+        )
+    print(f"[seed] LLM key {_mask(key)} from {source}; starting seed…", flush=True)
+
+    # Lazy import: seed.py imports this module, so importing it at module load
+    # would be circular. It lives at the project root, so make sure that's importable.
+    if _PROJECT_ROOT not in sys.path:
+        sys.path.insert(0, _PROJECT_ROOT)
+    from seed import ALL_INCIDENTS
+
+    total = len(ALL_INCIDENTS)
+    # Small pause between incidents so a full 17-incident seed doesn't trip the
+    # HuggingFace free-tier rate limit (each incident makes several embedding
+    # calls). Tunable via SEED_DELAY_SECONDS; set to 0 to disable.
+    delay = float(os.getenv("SEED_DELAY_SECONDS", "1.0"))
+    print(f"[seed] ingesting {total} incidents… (delay {delay}s between each)", flush=True)
+    for i, inc in enumerate(ALL_INCIDENTS, 1):
+        try:
+            await ingest_incident(inc)
+            print(f"[seed]   [{i:02d}/{total}] {inc['incident_id']} ok", flush=True)
+        except Exception as e:
+            # Surface the incident that broke and the error type, then abort so
+            # the caller/logs see a real failure instead of a half-empty graph.
+            print(f"[seed]   [{i:02d}/{total}] {inc['incident_id']} FAILED: "
+                  f"{type(e).__name__}: {e}", flush=True)
+            raise
+        if delay and i < total:
+            await asyncio.sleep(delay)
+    final = await count_incidents()
+    print(f"[seed] done -> {final} incident(s) in store", flush=True)
+    return {"seeded": True, "count": final}
+
+
+# Seed runs in the background AFTER the server binds its port (see main.py), so
+# the process never fails Render's port scan. This tracks its progress for the
+# GET /api/seed-status endpoint the frontend can poll.
+_seed_status: dict = {
+    "state": "pending",   # pending -> in_progress -> complete | failed
+    "seeded": False,
+    "count": 0,
+    "total": 0,
+    "error": None,
+    "started_at": None,
+    "finished_at": None,
+}
+
+
+def get_seed_status() -> dict:
+    """Current state of the background seed (safe to call any time). The count is
+    read live from the store so a polling client sees incremental progress."""
+    status = dict(_seed_status)
+    status["count"] = len(_load_store())
+    return status
+
+
+async def run_startup_seed() -> dict:
+    """Background entry point: seed the graph if empty, then warm the insights
+    cache, updating _seed_status throughout so /api/seed-status reflects reality.
+    Never raises — a failure is recorded in the status and logged, not thrown,
+    because this runs detached from the request cycle."""
+    global _seed_status
+    _seed_status = {
+        **_seed_status,
+        "state": "in_progress",
+        "count": await count_incidents(),
+        "error": None,
+        "started_at": _now_iso(),
+        "finished_at": None,
+    }
+    try:
+        result = await seed_if_empty()
+        _seed_status = {
+            **_seed_status,
+            "state": "complete",
+            "seeded": result.get("seeded", False),
+            "count": result.get("count", await count_incidents()),
+            "finished_at": _now_iso(),
+        }
+        # Warm the insights cache now that the graph is ready (best-effort).
+        try:
+            await get_insights()
+        except Exception:
+            pass
+    except Exception as e:
+        _seed_status = {
+            **_seed_status,
+            "state": "failed",
+            "count": await count_incidents(),
+            "error": f"{type(e).__name__}: {e}",
+            "finished_at": _now_iso(),
+        }
+        print("[seed] run_startup_seed caught a failure:", flush=True)
+        traceback.print_exc()
+    return get_seed_status()
 
 
 def bootstrap_store(incidents: list[dict]) -> int:
@@ -581,37 +855,78 @@ async def _compute_insights() -> dict:
     }
 
 
-async def get_insights() -> dict:
-    """Return proactive insights from an in-memory cache.
+def _load_insights_file() -> dict | None:
+    """Read the persisted insights, or None if there is no valid file."""
+    if not os.path.exists(_INSIGHTS_PATH):
+        return None
+    try:
+        with open(_INSIGHTS_PATH, "r") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return None
 
-    recall() is expensive, so we compute the insights ONCE (at startup, and
-    again only after the graph's meaning changes — a new incident ingested or a
-    status change). Every GET /api/insights just returns the cached result, so
-    page refreshes cost nothing. The cache is recomputed lazily on the first
-    request after it's been marked dirty, guarded by a lock so concurrent
-    requests don't all fire recall() at once.
+
+def _save_insights_file(data: dict) -> None:
+    os.makedirs(_DATA_DIR, exist_ok=True)
+    tmp = _INSIGHTS_PATH + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(data, f, indent=2)
+    os.replace(tmp, _INSIGHTS_PATH)
+
+
+async def get_insights() -> dict:
+    """Return proactive insights from a disk-backed cache.
+
+    recall() is expensive AND non-deterministic, so we compute the insights ONCE
+    and reuse the exact same result until the graph's meaning changes — a new
+    incident ingested or a status change. The computed result is written to disk
+    (_INSIGHTS_PATH), so it survives server restarts: every GET /api/insights,
+    across page refreshes and restarts alike, returns byte-for-byte the same
+    insights until invalidate_insights() runs. A recompute only happens when the
+    cache is genuinely absent (never computed) or has been invalidated.
     """
     global _insights_cache, _insights_dirty
 
+    # Fast path: warm in-memory copy that hasn't been invalidated this process.
     if _insights_cache is not None and not _insights_dirty:
         return {**_insights_cache, "cached": True}
 
     async with _insights_lock:
-        # Re-check inside the lock: another coroutine may have just computed it.
+        # Re-check inside the lock: another coroutine may have just populated it.
         if _insights_cache is not None and not _insights_dirty:
             return {**_insights_cache, "cached": True}
+
+        # Not invalidated this process: a persisted result (e.g. from before a
+        # restart) is still valid — load it instead of paying for recall() again.
+        if not _insights_dirty:
+            persisted = _load_insights_file()
+            if persisted is not None:
+                _insights_cache = persisted
+                return {**_insights_cache, "cached": True}
+
+        # Nothing valid on disk, or we were invalidated: compute once and persist.
         _insights_cache = await _compute_insights()
         _insights_dirty = False
+        try:
+            _save_insights_file(_insights_cache)
+        except OSError:
+            pass  # a failed write just means the next restart recomputes
         return {**_insights_cache, "cached": False}
 
 
 def invalidate_insights() -> None:
     """Mark the insights cache stale. Called when a new incident is ingested or
     an incident's status changes — the only events that alter what the insights
-    would say. The next GET /api/insights recomputes once; intervening reads
-    keep serving the last good result."""
+    would say. Clears both the in-memory copy and the persisted file so a restart
+    before the next read can't resurrect the stale result. The next GET
+    /api/insights recomputes once and re-persists."""
     global _insights_dirty
     _insights_dirty = True
+    try:
+        if os.path.exists(_INSIGHTS_PATH):
+            os.remove(_INSIGHTS_PATH)
+    except OSError:
+        pass
 
 
 def _split_insights(text: str) -> list[str]:

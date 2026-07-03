@@ -1,0 +1,34 @@
+# Keep the Docker build context small and never bake secrets/venv into the image.
+
+# VCS
+.git
+.gitignore
+
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Secrets / env — must never be copied into the image
+.env
+.env.*
+*.env
+backend/.env
+
+# Cognee + runtime state (recreated at runtime under /tmp)
+.cognee_system/
+.data_storage/
+.cognee_cache/
+backend/data/
+*.log
+
+# Frontend (the backend image doesn't need it)
+frontend/
+
+# Dev-only docs/scripts not needed at runtime
+CHECKLIST.md
+CLAUDE_CODE_BRIEF.md
+polish_shots.mjs
+demo_e2e.mjs

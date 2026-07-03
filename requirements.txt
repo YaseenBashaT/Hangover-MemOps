@@ -1,7 +1,20 @@
-# MemOps backend dependencies (Python 3.12+).
-# cognee pulls in litellm, fastembed, and the ladybug graph store transitively.
-cognee==1.2.2
+# MemOps backend dependencies.
+# Audited against every import in backend/ and seed.py; versions are the exact
+# ones verified working locally, so a fresh server reproduces the same stack.
+
+# Web framework + ASGI server
 fastapi==0.138.2
 uvicorn==0.49.0
-python-dotenv==1.0.1
+pydantic==2.12.5          # imported directly in backend/models/schemas.py
+python-dotenv==1.0.1      # from dotenv import load_dotenv
+
+# Memory layer. Embeddings now run on HuggingFace's hosted inference API (see
+# memory_service._configure_cognee), NOT local fastembed — that keeps ~200 MB of
+# onnxruntime + model weights out of the process so it fits a 512 MB instance.
+# So the [fastembed] extra is intentionally NOT installed. cognee brings litellm
+# (LLM calls) and the ladybug graph store in transitively.
+cognee==1.2.2
+
+# Runtime dependency: the HuggingFace embedding shim in memory_service posts to
+# HF's inference router with httpx. Also used by the in-process test scripts.
 httpx==0.28.1
