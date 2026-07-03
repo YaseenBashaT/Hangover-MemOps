@@ -44,13 +44,33 @@ function fmtWhen(ts) {
 export default function Dashboard() {
   const navigate = useNavigate();
   const location = useLocation();
-  // nodes reinforced by a just-approved fix (passed from the alert flow)
-  const highlightIds = location.state?.reinforced || [];
+  // Nodes reinforced by the most recently approved fix, passed from the alert
+  // flow as router state ({ reinforced, at }). Kept in local state (not read
+  // directly off location.state) so we can: (a) fully swap it out — not merge
+  // — every time a NEW approval arrives, so the previous green highlight
+  // disappears the moment a fresh one exists, and (b) let the user toggle it
+  // on/off without losing the underlying data.
+  const [highlightIds, setHighlightIds] = useState(location.state?.reinforced || []);
+  const [showHighlight, setShowHighlight] = useState(true);
+  const [highlightAt, setHighlightAt] = useState(location.state?.at || null);
   const [incidents, setIncidents] = useState(null);
   const [graph, setGraph] = useState(null);
   const [insights, setInsights] = useState(null);
   const [err, setErr] = useState(null);
   const [insightsErr, setInsightsErr] = useState(null);
+
+  // A distinct `at` timestamp means a genuinely new reinforcement just
+  // happened (as opposed to the same navigation re-rendering) — replace the
+  // old highlight set outright and default it back to visible.
+  useEffect(() => {
+    const incoming = location.state?.reinforced;
+    const at = location.state?.at;
+    if (incoming && at !== highlightAt) {
+      setHighlightIds(incoming);
+      setShowHighlight(true);
+      setHighlightAt(at);
+    }
+  }, [location.state, highlightAt]);
 
   useEffect(() => {
     let alive = true;
@@ -166,13 +186,25 @@ export default function Dashboard() {
               <GraphView
                 data={graph}
                 onIncidentClick={onIncidentClick}
-                highlightIds={highlightIds}
+                highlightIds={showHighlight ? highlightIds : []}
               />
             )}
             {highlightIds.length > 0 && (
-              <div className="pointer-events-none absolute right-3 top-3 rounded-lg border border-green-500/40 bg-green-500/10 px-3 py-1.5 text-xs text-green-300 animate-memify">
+              <button
+                type="button"
+                onClick={() => setShowHighlight((v) => !v)}
+                title={showHighlight ? "Hide reinforced-memory highlight" : "Show reinforced-memory highlight"}
+                className={`absolute right-3 top-3 flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs transition ${
+                  showHighlight
+                    ? "border-green-500/40 bg-green-500/10 text-green-300 animate-memify"
+                    : "border-edge bg-panel2/80 text-gray-400 hover:text-gray-200"
+                }`}
+              >
                 🧠 memory reinforced — {highlightIds.length} node(s) strengthened
-              </div>
+                <span className="ml-1 rounded border border-current/40 px-1.5 py-0.5 text-[10px] uppercase tracking-wide">
+                  {showHighlight ? "Hide" : "Show"}
+                </span>
+              </button>
             )}
             {/* legend */}
             <div className="pointer-events-none absolute bottom-3 left-3 flex flex-wrap gap-2 rounded-lg border border-edge bg-ink/70 px-2.5 py-1.5">
