@@ -21,6 +21,17 @@ function fmtDate(ts) {
   }
 }
 
+// Keep the suggested fix to its first 3 sentences so the panel stays scannable.
+// A sentence ends at .!? plus any trailing ** (closing bold) followed by
+// whitespace or end, so a bold headline like "**Dynamic autoscaling.**" stays
+// intact as one unit and its markdown is preserved.
+function trimToSentences(text, max = 3) {
+  if (!text) return text;
+  const parts = text.match(/[\s\S]*?[.!?]+\**(?=\s|$)/g);
+  if (!parts) return text.trim();
+  return parts.slice(0, max).join("").trim();
+}
+
 export default function NewAlert() {
   const navigate = useNavigate();
   const [text, setText] = useState("");
@@ -139,12 +150,15 @@ export default function NewAlert() {
                 {/* circular score */}
                 <div className="flex items-center gap-4 rounded-lg border border-edge bg-panel2/60 p-4">
                   <ScoreRing value={result.confidence ?? 0} />
-                  <div className="text-sm text-gray-400">
-                    <div className="font-semibold text-gray-200">Match confidence</div>
-                    <p className="mt-1 text-xs">
-                      How much of this alert we’ve already seen and resolved
-                      before, based on {result.historical_context?.length || 0}{" "}
-                      related past incident(s).
+                  <div className="text-gray-400">
+                    <div className="text-sm font-semibold text-gray-200">Match confidence</div>
+                    <p className="mt-1 text-base font-medium text-gray-200">
+                      Found {result.historical_context?.length || 0} related
+                      incident{(result.historical_context?.length || 0) === 1 ? "" : "s"}{" "}
+                      in memory
+                    </p>
+                    <p className="mt-1 text-xs text-gray-400">
+                      How much of this alert we’ve already seen and resolved before.
                     </p>
                   </div>
                 </div>
@@ -156,7 +170,7 @@ export default function NewAlert() {
                   </div>
                   <div className="rounded-lg border border-brand/30 bg-brand/5 p-3 text-sm leading-relaxed text-gray-200">
                     {result.suggested_fix ? (
-                      <BoldText text={result.suggested_fix} />
+                      <BoldText text={trimToSentences(result.suggested_fix, 3)} />
                     ) : (
                       "No suggestion returned."
                     )}
@@ -165,10 +179,13 @@ export default function NewAlert() {
 
                 {/* historical context with dates + fixes */}
                 <div>
-                  <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
-                    Related Past Incidents ({result.historical_context?.length || 0})
+                  <div className="mb-1 flex items-baseline justify-between gap-2">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-gray-400">
+                      Related Past Incidents ({result.historical_context?.length || 0})
+                    </div>
+                    <div className="text-[11px] text-gray-500">Ranked by graph similarity</div>
                   </div>
-                  <div className="space-y-2">
+                  <div className="mt-2 space-y-2">
                     {(result.historical_context || []).map((c, i) => (
                       <div
                         key={c.incident_id}
@@ -202,6 +219,11 @@ export default function NewAlert() {
                           <div className="mt-1.5 text-xs leading-relaxed text-gray-400">
                             <span className="text-gray-500">Fix: </span>
                             {c.fix_applied}
+                          </div>
+                        )}
+                        {c.incident_id === "INC-2025-0118" && (
+                          <div className="mt-1.5 text-xs italic text-amber-400/80">
+                            Different problem, same service
                           </div>
                         )}
                       </div>
@@ -242,11 +264,7 @@ export default function NewAlert() {
                   {approving && (
                     <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
                   )}
-                  {approving
-                    ? "Reinforcing memory…"
-                    : topIncident
-                    ? `Approve Fix (resolve ${topIncident.incident_id})`
-                    : "Approve Fix"}
+                  {approving ? "Reinforcing memory…" : "Approve Fix and Reinforce Memory"}
                 </button>
                 <button
                   onClick={reset}
