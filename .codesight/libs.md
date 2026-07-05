@@ -1,0 +1,30 @@
+# Libraries
+
+- `backend/main.py` — function lifespan: (app)
+- `backend/models/schemas.py`
+  - class JiraTicket
+  - class Incident
+  - class RecallRequest
+  - class AlertRequest
+  - class ForgetRequest
+  - class HealthResponse
+- `backend/services/memory_service.py`
+  - function llm_key_info: () -> tuple[str | None, str]
+  - function get_seed_status: () -> dict
+  - function bootstrap_store: (incidents) -> int
+  - function list_incidents: () -> list[dict]
+  - function get_incident: (incident_id) -> dict | None
+  - function invalidate_insights: () -> None
+  - _...11 more_
+- `explore_cognee.py` — function run: ()
+- `frontend/src/api.js`
+  - function loadInsightsOnce: () => void
+  - function sevColor: (sev) => void
+  - const api
+  - const SEV_COLORS
+- `reseed17.py` — function run: ()
+- `seed.py` — function run: ()
+- `test_endpoints.py` — function show: (title, resp), function main: (which)
+- `test_phase1.py` — function run: ()
+- `test_phase2.py` — function run: (), class CallTracker
+- `verify_recalls.py` — function run: ()

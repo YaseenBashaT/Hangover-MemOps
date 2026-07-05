@@ -7,6 +7,8 @@ app_port: 7860
 
 # MemOps
 
+**Live demo:** [mem-ops.vercel.app](https://mem-ops.vercel.app) · **Backend API:** [beyanki-memops-api.hf.space](https://beyanki-memops-api.hf.space)
+
 MemOps remembers how your team fixed production incidents, so the next person who gets paged does not start from nothing.
 
 ## The problem
@@ -33,24 +35,33 @@ MemOps uses Cognee 1.2.2 as its memory layer. Every call into Cognee lives behin
 
 **remember() stores each incident.** On ingest, MemOps formats an incident into one text block that carries its ID, service, severity, error log, Slack thread, Jira ticket, git commits, and applied fix, then calls `remember()` against a shared dataset named `incidents`. Cognee pulls entities and relationships out of that text and writes them into the graph. Because every incident lands in the same dataset, the payments-api node created by INC-2024-1014 is the same node that INC-2025-0203 and INC-2025-0819 attach to. That shared node is how three separate incidents become one connected story instead of three isolated records.
 
-**recall() traverses the graph when a new alert fires.** MemOps turns the alert text into a direct question and calls `recall()` with the GRAPH_COMPLETION search type. Cognee retrieves the connected triplets around the query and lets the model reason over them in a single completion. I made that a deliberate choice. Cognee's default routing can fan a query out into five or more model calls, and one call is enough once the graph is dense, so recall stays cheap and fast. The answer to a pool-exhaustion alert comes back naming the three payments-api incidents by their IDs, not summarizing connection pools in the abstract.
+**recall() finds related incidents when a new alert fires.** MemOps turns the alert text into a direct question and calls `recall()` with the GRAPH_COMPLETION search type for the suggested fix. For the ranked "Related Past Incidents" cards, it uses `recall()` with `SearchType.CHUNKS` — Cognee's vector store returns the most relevant document chunks, each tagged with an Incident ID, and those IDs are mapped to their structured incident cards. The ranking is real embedding similarity from Cognee's own vector store (HuggingFace `all-MiniLM-L6-v2`), not keyword matching. For the payments-api pool alert, INC-2024-1014, INC-2025-0203, and INC-2025-0819 rank above INC-2025-0118 because the embedding space separates pool-exhaustion incidents from the unrelated auth outage on the same service.
 
-**improve() strengthens fix patterns when an engineer approves.** Approving a fix calls `improve()` on the `incidents` dataset. Cognee re-runs its enrichment pipeline and re-indexes the triplet embeddings around the resolved incident and its neighbors. Those embeddings are computed by HuggingFace's hosted inference API (`all-MiniLM-L6-v2`), which is separate from the Groq LLM, so the step spends zero LLM completion tokens. MemOps reads back which service was strengthened, how many related incidents were touched, and the current node and edge counts, then the frontend lights up exactly those nodes on the dashboard graph.
+**improve() strengthens fix patterns when an engineer approves.** Approving a fix calls `improve()` on the `incidents` dataset. Cognee re-runs its enrichment pipeline and re-indexes the triplet embeddings around the resolved incident and its neighbors. To make the learning visible, MemOps captures a before-recall and an after-recall (using the same canonical query) around the `improve()` call and returns both to the frontend. The MemifyCard's "See what changed" section shows the two answers side-by-side so the judge can see whether the graph's answer evolved. If the answers are identical the card says "graph re-indexed; answer already optimal" — never a fabricated diff.
 
-**forget() prunes closed datasets.** When a dataset is done, `forget()` drops it from the graph. MemOps puts an explicit name check in front of the shared `incidents` dataset so a stray call cannot erase the seeded history by accident. This is the operation that keeps the memory from growing forever as old services get retired.
+**forget() prunes closed datasets.** When a dataset is done, `forget()` drops it from the graph. MemOps puts an explicit name check in front of the shared `incidents` dataset so a stray call cannot erase the seeded history by accident.
+
+## The four Cognee primitives — all live in the UI
+
+| Primitive | What MemOps does | Where to trigger it |
+|---|---|---|
+| `remember()` | Formats an incident into a text block and ingests it into the Cognee graph | **Log Incident** page → fill form → submit |
+| `recall()` | Retrieves relevant chunks (ranking) + GRAPH_COMPLETION (suggested fix) | **New Alert** page → paste alert → Analyze |
+| `improve()` | Re-indexes graph triplets after a resolution; before/after evidence captured | **New Alert** or **Incident Detail** → Approve Fix |
+| `forget()` | Prunes a named dataset from graph memory | Demonstrated in the demo video against a scratch dataset |
 
 The LLM provider is a config value, not a hard dependency. It is read from environment variables in that same file, and MemOps runs on Groq's `llama-3.3-70b-versatile` right now. Switching to another OpenAI-compatible endpoint is a config change rather than a rewrite, because the embeddings stay local and the graph never has to be rebuilt.
 
 ## The demo
 
-1. Start the backend and frontend (see Setup) and open `http://localhost:5173`.
-2. Look at the knowledge graph. There are seventeen incident nodes, colored by severity, connected through the services and fixes they share.
-3. Read one of the proactive insights on the right. Each names a service and cites the incident IDs behind it, such as the payments-api pool exhaustion across INC-2024-1014, INC-2025-0203, and INC-2025-0819.
-4. Click New Alert and paste this text: `payments-api is throwing connection pool errors, pool appears exhausted, service degraded`
-5. Click Analyze. The right column fills with a match score, the three payments-api incidents in ranked order, and a suggested fix describing the dynamic autoscaling approach from the most recent one.
-6. Click Approve Fix. A green panel confirms the graph was reinforced and lists the nodes that were strengthened.
-7. Watch the return to the dashboard. The payments-api nodes are brighter and their edges are heavier than they were a moment ago.
-8. Click one of the payments-api nodes. Its detail page shows the full incident, including the original Slack thread and the other payments-api incidents it links to.
+1. Open [mem-ops.vercel.app](https://mem-ops.vercel.app).
+2. Look at the knowledge graph. Seventeen incident nodes, colored by severity, connected through services and fixes.
+3. Read one of the proactive insights on the right. Each names a service and cites real incident IDs.
+4. Click **New Alert** and paste: `payments-api is throwing connection pool errors, pool appears exhausted, service degraded`
+5. Click **Analyze**. Watch the three progress stages: embedding → graph traversal → synthesis. Results show the three payments-api incidents ranked by Cognee retrieval, the distractor (INC-2025-0118, different problem same service, scored far lower), and a suggested fix from the most recent resolution.
+6. Click **Approve Fix → Reinforce Memory**. The MemifyCard appears — expand "See what changed" to view the before/after recall evidence of what the graph learned.
+7. Watch the return to the dashboard. The reinforced nodes are highlighted green.
+8. Click **Log Incident** in the nav. Fill out the form and submit — watch a new node appear in the graph (`remember()` live).
 
 ## Tech stack
 

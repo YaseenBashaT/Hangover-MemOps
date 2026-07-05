@@ -215,6 +215,19 @@ _insights_cache: dict | None = None
 _insights_dirty: bool = False
 _insights_lock = asyncio.Lock()
 
+# ---------------------------------------------------------------------------
+# Graph snapshot cache (P1-b: avoids _graph_lock contention during recalls)
+# ---------------------------------------------------------------------------
+_graph_cache: dict | None = None
+_graph_cache_at: float = 0.0
+_GRAPH_CACHE_TTL = 60.0  # seconds
+
+
+def invalidate_graph_cache() -> None:
+    global _graph_cache, _graph_cache_at
+    _graph_cache = None
+    _graph_cache_at = 0.0
+
 
 # ---------------------------------------------------------------------------
 # Structured store helpers (no LLM, no Cognee — plain JSON on disk)
@@ -329,6 +342,8 @@ async def ingest_incident(incident: dict) -> dict:
         _save_store(records)
     # A new incident changes what the insights would say → refresh on next read.
     invalidate_insights()
+    # Invalidate the graph snapshot cache so the next Dashboard load shows the new node.
+    invalidate_graph_cache()
     return record
 
 
@@ -503,8 +518,8 @@ async def recall_for_alert(alert_text: str) -> dict:
     actual fix instead of just acknowledging the statement ("Got it."). If the
     answer still comes back degenerate, we retry once and then, as a last
     resort, synthesize a fix from the closest past incident."""
-    # Related incidents first (free, no LLM) — also used for the fallback fix.
-    related, confidence = _related_incidents_for_text(alert_text)
+    # Related incidents — real Cognee CHUNKS retrieval (or keyword fallback).
+    related, confidence = await _related_incidents_for_text(alert_text)
 
     primary = (
         f'A new production alert just fired: "{alert_text}". Based on the past '
@@ -539,14 +554,85 @@ async def recall_for_alert(alert_text: str) -> dict:
     }
 
 
-def _related_incidents_for_text(text: str, limit: int = 5) -> tuple[list[dict], int]:
-    """Lightweight, LLM-free relevance: rank stored incidents by token overlap
-    with the alert text (service name, alert name, error log keywords).
+async def _related_incidents_for_text(text: str, limit: int = 5) -> tuple[list[dict], int]:
+    """Rank stored incidents by real Cognee CHUNKS retrieval — embeddings from
+    Cognee's own vector store, not token overlap.
+
+    Falls back to keyword overlap (_keyword_fallback_ranking) only when Cognee
+    returns no chunks (e.g., graph not yet seeded). That fallback is clearly
+    labeled so it can never be confused with real retrieval.
 
     Returns (cards, confidence). Each card carries a `match_score` (0-100).
-    `confidence` reflects the best match: the fraction of the alert's meaningful
-    tokens that we've already seen in a past incident, nudged up when several
-    incidents corroborate. Real signal, not a fabricated number.
+    """
+    try:
+        chunks = await cognee.recall(text, query_type=SearchType.CHUNKS)
+    except Exception as exc:
+        print(f"[recall] CHUNKS retrieval failed ({exc}); using keyword fallback", flush=True)
+        chunks = []
+
+    if chunks:
+        return _score_chunks_to_cards(chunks, limit)
+
+    # Cognee returned nothing (graph empty / not yet seeded) — honest fallback.
+    print("[recall] CHUNKS returned empty; using keyword fallback", flush=True)
+    return _keyword_fallback_ranking(text, limit)
+
+
+def _score_chunks_to_cards(chunks, limit: int) -> tuple[list[dict], int]:
+    """Map Cognee-retrieved DocumentChunks to incident cards.
+
+    Each chunk's text starts with 'Incident ID : INC-...' — use _INCIDENT_ID_RE
+    to extract the ID. Score = 100 for rank-1 chunk, decreasing by 10 per rank
+    (Cognee doesn't always expose raw similarity scores, so ordinal rank is used
+    as a proxy — honest and reproducible).
+    """
+    store_by_id = {r.get("incident_id"): r for r in _load_store()}
+
+    seen: dict[str, float] = {}  # incident_id -> best score
+    ordered: list[str] = []
+    for rank, chunk in enumerate(chunks):
+        chunk_text = (
+            getattr(chunk, "text", None)
+            or getattr(chunk, "content", None)
+            or str(chunk)
+        )
+        m = _INCIDENT_ID_RE.search(chunk_text)
+        if not m:
+            continue
+        iid = m.group(1)
+        score = max(0, 100 - rank * 10)
+        if iid not in seen:
+            seen[iid] = score
+            ordered.append(iid)
+        else:
+            seen[iid] = max(seen[iid], score)
+
+    top_ids = ordered[:limit]
+    cards = []
+    for iid in top_ids:
+        r = store_by_id.get(iid)
+        if not r:
+            continue
+        card = _basic_view(r)
+        card["match_score"] = int(seen[iid])
+        card["fix_applied"] = r.get("fix_applied")
+        jira = r.get("jira_ticket") or {}
+        card["jira_id"] = jira.get("id")
+        cards.append(card)
+
+    if not cards:
+        return [], 0
+
+    top_score = cards[0]["match_score"]
+    corroboration = min(15, 5 * (len(cards) - 1))
+    confidence = int(min(96, top_score + corroboration))
+    return cards, confidence
+
+
+def _keyword_fallback_ranking(text: str, limit: int = 5) -> tuple[list[dict], int]:
+    """Last-resort ranker: token overlap between alert text and stored incident
+    fields. Used ONLY when Cognee's vector store is unavailable or empty.
+    Clearly separated from the real retrieval path; never labeled as graph-based.
     """
     alert_tokens = {t for t in _tokenize(text) if len(t) > 2}
     denom = max(1, len(alert_tokens))
@@ -564,20 +650,17 @@ def _related_incidents_for_text(text: str, limit: int = 5) -> tuple[list[dict], 
     for overlap, r in top:
         card = _basic_view(r)
         card["match_score"] = round(100 * overlap / denom)
-        # Cards show dates + the fix that worked, so the engineer sees the
-        # evolution of past resolutions at a glance.
         card["fix_applied"] = r.get("fix_applied")
         jira = r.get("jira_ticket") or {}
         card["jira_id"] = jira.get("id")
         cards.append(card)
 
     if not scored:
-        confidence = 0
-    else:
-        best_overlap = scored[0][0]
-        base = 100 * best_overlap / denom
-        corroboration = min(15, 5 * (len(scored) - 1))  # more matches → more sure
-        confidence = int(min(96, round(base + corroboration)))
+        return [], 0
+    best_overlap = scored[0][0]
+    base = 100 * best_overlap / denom
+    corroboration = min(15, 5 * (len(scored) - 1))
+    confidence = int(min(96, round(base + corroboration)))
     return cards, confidence
 
 
@@ -592,7 +675,10 @@ def _tokenize(text: str) -> list[str]:
 async def resolve_incident(incident_id: str) -> dict | None:
     """Mark an incident resolved and run Cognee's enrichment pass (improve) on
     the incidents graph. Returns a structured description of what got
-    strengthened so the frontend can show it."""
+    strengthened so the frontend can show it.
+
+    P0-c: Captures a before/after recall pair around improve() so the UI can
+    show real evidence that learning occurred."""
     async with _store_lock:
         records = _load_store()
         rec = next((r for r in records if r.get("incident_id") == incident_id), None)
@@ -605,20 +691,56 @@ async def resolve_incident(incident_id: str) -> dict | None:
 
     # A status change alters what the insights would say → refresh on next read.
     invalidate_insights()
+    # Invalidate the graph snapshot cache so the next Dashboard load is fresh.
+    invalidate_graph_cache()
 
     service = rec.get("service_affected")
+    alert_name = rec.get("alert_name", "")
 
-    # Snapshot the graph before/after enrichment so we can report the delta.
+    # Canonical query for the before/after evidence recall.
+    evidence_query = (
+        f"{alert_name} on {service} — what is the recommended fix based on past incidents?"
+    )
+
     # Whole block under the graph lock so a concurrent read can't grab the
-    # ladybug file lock mid-improve.
+    # ladybug file lock mid-improve. before-recall → improve → after-recall.
     async with _graph_lock:
         before = await _graph_metrics()
+
+        # Capture "before" recall — what the graph knew before reinforcement.
+        try:
+            before_answer = (await _recall_text(evidence_query)).strip()
+        except Exception:
+            before_answer = ""
+
         try:
             await cognee.improve(dataset=INCIDENTS_DATASET)
             enrichment_ok = True
         except Exception:  # never let improve() failure block the resolve
             enrichment_ok = False
+
+        # Capture "after" recall — what the graph knows after reinforcement.
+        try:
+            after_answer = (await _recall_text(evidence_query)).strip()
+        except Exception:
+            after_answer = ""
+
         after = await _graph_metrics()
+
+    # Build the learning evidence payload.
+    if before_answer and after_answer:
+        if before_answer == after_answer:
+            evidence_note = "graph re-indexed; answer already optimal"
+        else:
+            evidence_note = None
+        learning_evidence = {
+            "query": evidence_query,
+            "before": before_answer,
+            "after": after_answer,
+            "note": evidence_note,
+        }
+    else:
+        learning_evidence = None
 
     # The connections being reinforced: other incidents on the same service.
     related = [
@@ -639,6 +761,7 @@ async def resolve_incident(incident_id: str) -> dict | None:
             "edges_before": before["edges"],
             "edges_after": after["edges"],
         },
+        "learning_evidence": learning_evidence,
         "reinforced_connections": related,
         "message": (
             f"Resolved {incident_id}. Re-indexed the {service} subgraph and reinforced "
@@ -736,12 +859,15 @@ async def _graph_metrics() -> dict:
 async def get_graph() -> dict:
     """Return the incidents knowledge graph as D3.js-ready nodes + links.
 
-    Real Cognee graph data, enriched so the frontend can render an
-    incident-centric view: each DocumentChunk node that represents an incident
-    is tagged with node_kind='incident', its parsed incident_id, and the
-    severity/service/alert joined from the structured store. All other Cognee
-    nodes (entities, types, docs) get node_kind='entity' (rendered neutral/gray).
+    P1-b: Caches the result for _GRAPH_CACHE_TTL seconds so Dashboard reads
+    never block during an 11s recall. Invalidated by ingest/resolve/forget.
     """
+    import time
+    global _graph_cache, _graph_cache_at
+    now = time.monotonic()
+    if _graph_cache is not None and (now - _graph_cache_at) < _GRAPH_CACHE_TTL:
+        return _graph_cache
+
     async with _graph_lock:
         raw_nodes, raw_edges = await _read_graph_data()
 
@@ -791,7 +917,7 @@ async def get_graph() -> dict:
         src, dst, rel = str(edge[0]), str(edge[1]), edge[2]
         links.append({"source": src, "target": dst, "relationship": rel})
 
-    return {
+    result = {
         "nodes": nodes,
         "links": links,
         "stats": {
@@ -802,6 +928,10 @@ async def get_graph() -> dict:
             "entity_nodes": kind_counts["entity"],
         },
     }
+    import time
+    _graph_cache = result
+    _graph_cache_at = time.monotonic()
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -990,6 +1120,7 @@ async def forget_dataset(dataset_name: str) -> dict:
         async with _store_lock:
             removed_from_store = len(_load_store())
             _save_store([])
+    invalidate_graph_cache()
     return {
         "forgotten": dataset_name,
         "store_records_cleared": removed_from_store,

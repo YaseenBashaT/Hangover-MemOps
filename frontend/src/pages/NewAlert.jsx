@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, sevColor } from "../api.js";
 import { Panel, Spinner, ErrorBox, SeverityBadge, BoldText } from "../components/ui.jsx";
@@ -8,9 +8,14 @@ import MemifyCard from "../components/MemifyCard.jsx";
 const SAMPLE =
   "payments-api is throwing connection pool errors, pool appears exhausted, service degraded";
 
-// Persist the in-progress analysis across route changes (e.g. opening a
-// related incident then hitting browser back), which would otherwise unmount
-// this page and lose all local state.
+// Rotating status messages shown under the spinner during the ~11s analysis.
+const ANALYSIS_STAGES = [
+  "Embedding alert…",
+  "Traversing incident graph…",
+  "Synthesizing fix from past resolutions…",
+];
+
+// Persist the in-progress analysis across route changes.
 const STORAGE_KEY = "memops_new_alert_state";
 
 function loadPersisted() {
@@ -52,9 +57,6 @@ function fmtDate(ts) {
 }
 
 // Keep the suggested fix to its first 3 sentences so the panel stays scannable.
-// A sentence ends at .!? plus any trailing ** (closing bold) followed by
-// whitespace or end, so a bold headline like "**Dynamic autoscaling.**" stays
-// intact as one unit and its markdown is preserved.
 function trimToSentences(text, max = 3) {
   if (!text) return text;
   const parts = text.match(/[\s\S]*?[.!?]+\**(?=\s|$)/g);
@@ -62,11 +64,25 @@ function trimToSentences(text, max = 3) {
   return parts.slice(0, max).join("").trim();
 }
 
+// P0-b: Derive the "Different problem, same service" label dynamically.
+// A card is a distractor if it shares the top card's service but its
+// match_score is well below the top score (< 45% of top).
+function isDistractor(card, topCard) {
+  if (!topCard || !card) return false;
+  if (card.incident_id === topCard.incident_id) return false;
+  return (
+    card.service_affected === topCard.service_affected &&
+    card.match_score < topCard.match_score * 0.45
+  );
+}
+
 export default function NewAlert() {
   const navigate = useNavigate();
   const persisted = loadPersisted();
   const [text, setText] = useState(persisted?.text || "");
   const [loading, setLoading] = useState(false);
+  const [stageIdx, setStageIdx] = useState(0);
+  const stageTimer = useRef(null);
   const [result, setResult] = useState(persisted?.result || null);
   const [err, setErr] = useState(null);
   const [approving, setApproving] = useState(false);
@@ -75,13 +91,25 @@ export default function NewAlert() {
 
   const topIncident = result?.historical_context?.[0];
 
-  // Keep the raw alert text and its analysis around in sessionStorage so
-  // navigating to a related incident and back restores this exact view.
+  // Keep the raw alert text and its analysis around in sessionStorage.
   useEffect(() => {
     if (result) {
       savePersisted({ text, result });
     }
   }, [text, result]);
+
+  // Rotate analysis stage label every 2.5s while loading.
+  useEffect(() => {
+    if (loading) {
+      setStageIdx(0);
+      stageTimer.current = setInterval(() => {
+        setStageIdx((i) => (i + 1) % ANALYSIS_STAGES.length);
+      }, 2500);
+    } else {
+      clearInterval(stageTimer.current);
+    }
+    return () => clearInterval(stageTimer.current);
+  }, [loading]);
 
   async function analyze() {
     if (!text.trim()) return;
@@ -113,12 +141,9 @@ export default function NewAlert() {
     setApproving(true);
     setApproveErr(null);
     try {
-      // Resolve the most relevant historical incident → triggers improve().
       const res = await api.resolveIncident(topIncident.incident_id);
       setMemify(res);
       clearPersisted();
-      // After the panel is shown, drop back to the dashboard and highlight the
-      // nodes that were just reinforced so the graph visibly gets stronger.
       const reinforced = [
         res.incident_id,
         ...(res.reinforced_connections || []).map((c) => c.incident_id),
@@ -179,9 +204,13 @@ export default function NewAlert() {
                 Run an analysis to see historical context and a suggested fix.
               </div>
             )}
+            {/* P1-c: rotating progress theater */}
             {loading && (
-              <div className="flex h-full min-h-[220px] items-center justify-center">
-                <Spinner label="Querying the incident graph…" />
+              <div className="flex h-full min-h-[220px] flex-col items-center justify-center gap-3">
+                <Spinner />
+                <div className="text-sm text-brand animate-pulse">
+                  {ANALYSIS_STAGES[stageIdx]}
+                </div>
               </div>
             )}
             {err && <ErrorBox error={err} hint="Is the backend running on :8000?" />}
@@ -199,7 +228,7 @@ export default function NewAlert() {
                       in memory
                     </p>
                     <p className="mt-1 text-xs text-gray-400">
-                      How much of this alert we’ve already seen and resolved before.
+                      How much of this alert we've already seen and resolved before.
                     </p>
                   </div>
                 </div>
@@ -224,51 +253,57 @@ export default function NewAlert() {
                     <div className="text-xs font-semibold uppercase tracking-wide text-gray-400">
                       Related Past Incidents ({result.historical_context?.length || 0})
                     </div>
-                    <div className="text-[11px] text-gray-500">Ranked by graph similarity</div>
+                    {/* P0-a: honest label — uses real Cognee retrieval now */}
+                    <div className="text-[11px] text-gray-500">Ranked by Cognee retrieval</div>
                   </div>
                   <div className="mt-2 space-y-2">
-                    {(result.historical_context || []).map((c, i) => (
-                      <div
-                        key={c.incident_id}
-                        className={`rounded-lg border p-3 ${
-                          i === 0 ? "border-brand/50 bg-brand/5" : "border-edge bg-panel2/60"
-                        }`}
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <button
-                            onClick={() => navigate(`/incidents/${c.incident_id}`)}
-                            className="font-mono text-sm text-gray-100 hover:text-brand"
-                          >
-                            {c.incident_id}
-                            {i === 0 && (
-                              <span className="ml-2 rounded bg-brand/30 px-1.5 py-0.5 text-[10px] font-semibold text-brand">
-                                best match
-                              </span>
-                            )}
-                          </button>
-                          <div className="flex items-center gap-2">
-                            <span className="text-[11px] text-gray-500">{c.match_score}% match</span>
-                            <SeverityBadge severity={c.severity} />
+                    {(result.historical_context || []).map((c, i) => {
+                      // P0-b: dynamic distractor label (no hardcoded ID)
+                      const distractor = isDistractor(c, topIncident);
+                      return (
+                        <div
+                          key={c.incident_id}
+                          className={`rounded-lg border p-3 ${
+                            i === 0 ? "border-brand/50 bg-brand/5" : "border-edge bg-panel2/60"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <button
+                              onClick={() => navigate(`/incidents/${c.incident_id}`)}
+                              className="font-mono text-sm text-gray-100 hover:text-brand"
+                            >
+                              {c.incident_id}
+                              {i === 0 && (
+                                <span className="ml-2 rounded bg-brand/30 px-1.5 py-0.5 text-[10px] font-semibold text-brand">
+                                  best match
+                                </span>
+                              )}
+                            </button>
+                            <div className="flex items-center gap-2">
+                              <span className="text-[11px] text-gray-500">{c.match_score}% match</span>
+                              <SeverityBadge severity={c.severity} />
+                            </div>
                           </div>
+                          <div className="mt-1 flex items-center gap-2 text-xs text-gray-400">
+                            <span className="h-2 w-2 rounded-full" style={{ background: sevColor(c.severity) }} />
+                            {c.service_affected} · {fmtDate(c.timestamp)}
+                            {c.jira_id && <span className="text-gray-600">· {c.jira_id}</span>}
+                          </div>
+                          {c.fix_applied && (
+                            <div className="mt-1.5 text-xs leading-relaxed text-gray-400">
+                              <span className="text-gray-500">Fix: </span>
+                              {c.fix_applied}
+                            </div>
+                          )}
+                          {/* P0-b: dynamic distractor label based on score cliff */}
+                          {distractor && (
+                            <div className="mt-1.5 text-xs italic text-amber-400/80">
+                              Different problem, same service
+                            </div>
+                          )}
                         </div>
-                        <div className="mt-1 flex items-center gap-2 text-xs text-gray-400">
-                          <span className="h-2 w-2 rounded-full" style={{ background: sevColor(c.severity) }} />
-                          {c.service_affected} · {fmtDate(c.timestamp)}
-                          {c.jira_id && <span className="text-gray-600">· {c.jira_id}</span>}
-                        </div>
-                        {c.fix_applied && (
-                          <div className="mt-1.5 text-xs leading-relaxed text-gray-400">
-                            <span className="text-gray-500">Fix: </span>
-                            {c.fix_applied}
-                          </div>
-                        )}
-                        {c.incident_id === "INC-2025-0118" && (
-                          <div className="mt-1.5 text-xs italic text-amber-400/80">
-                            Different problem, same service
-                          </div>
-                        )}
-                      </div>
-                    ))}
+                      );
+                    })}
                     {result.historical_context?.length === 0 && (
                       <div className="text-sm text-gray-500">
                         No prior incidents matched this alert.

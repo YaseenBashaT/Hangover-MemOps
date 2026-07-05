@@ -25,10 +25,13 @@ export const api = {
   getIncident: (id) => req(`/api/incidents/${encodeURIComponent(id)}`),
   getGraph: () => req("/api/graph"),
   getInsights: () => req("/api/insights"),
+  getSeedStatus: () => req("/api/seed-status"),
   analyzeAlert: (alert_text) =>
     req("/api/alerts", { method: "POST", body: JSON.stringify({ alert_text }) }),
   resolveIncident: (id) =>
     req(`/api/incidents/${encodeURIComponent(id)}/resolve`, { method: "PATCH" }),
+  logIncident: (incident) =>
+    req("/api/incidents", { method: "POST", body: JSON.stringify(incident) }),
 };
 
 // Insights are LLM-backed and rarely change, so fetch them at most ONCE per

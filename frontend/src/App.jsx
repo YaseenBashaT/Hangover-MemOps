@@ -2,6 +2,7 @@ import { Routes, Route, NavLink, Link } from "react-router-dom";
 import Dashboard from "./pages/Dashboard.jsx";
 import NewAlert from "./pages/NewAlert.jsx";
 import IncidentDetail from "./pages/IncidentDetail.jsx";
+import LogIncident from "./pages/LogIncident.jsx";
 
 function RecallLogo() {
   return (
@@ -11,7 +12,7 @@ function RecallLogo() {
         <span className="absolute h-5 w-5 rounded-full border border-brand/60 group-hover:scale-110 transition-transform" />
       </span>
       <span className="text-lg font-semibold tracking-tight text-gray-100">
-        Recall
+        MemOps
       </span>
       <span className="hidden sm:inline text-[10px] uppercase tracking-widest text-gray-500 mt-1">
         SRE memory
@@ -38,6 +39,10 @@ function TopBar() {
           <NavLink to="/alert" className={linkCls}>
             New Alert
           </NavLink>
+          {/* P1-a: Log Incident exposes remember() in the UI */}
+          <NavLink to="/incidents/new" className={linkCls}>
+            Log Incident
+          </NavLink>
         </nav>
       </div>
     </header>
@@ -52,6 +57,8 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/alert" element={<NewAlert />} />
+          {/* P1-a: new route for logging incidents (remember()) */}
+          <Route path="/incidents/new" element={<LogIncident />} />
           <Route path="/incidents/:id" element={<IncidentDetail />} />
         </Routes>
       </main>

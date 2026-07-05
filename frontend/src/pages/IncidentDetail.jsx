@@ -4,7 +4,9 @@ import { api, sevColor } from "../api.js";
 import { Panel, Spinner, ErrorBox, SeverityBadge, StatusPill } from "../components/ui.jsx";
 import MemifyCard from "../components/MemifyCard.jsx";
 
-const STATUS_OPTIONS = ["open", "investigating", "resolved", "rolled-back", "escalated"];
+// STATUS_OPTIONS dropdown removed (P0-e): it was a silent no-op
+// that set only local state and reverted on refresh.
+// The Approve Fix button is the only way to resolve an incident.
 
 function Field({ label, children }) {
   return (
@@ -32,7 +34,6 @@ export default function IncidentDetail() {
   const [inc, setInc] = useState(null);
   const [err, setErr] = useState(null);
   const [related, setRelated] = useState([]);
-  const [selStatus, setSelStatus] = useState("open");
   const [resolving, setResolving] = useState(false);
   const [memify, setMemify] = useState(null);
   const [resolveErr, setResolveErr] = useState(null);
@@ -48,7 +49,6 @@ export default function IncidentDetail() {
         const data = await api.getIncident(id);
         if (!alive) return;
         setInc(data);
-        setSelStatus(data.status || "open");
         // related incidents = same service (the graph connects them via the
         // shared service entity) — pulled live, no mock data.
         try {
@@ -79,7 +79,6 @@ export default function IncidentDetail() {
     try {
       const res = await api.resolveIncident(id);
       setMemify(res);
-      setSelStatus("resolved");
       const fresh = await api.getIncident(id);
       setInc(fresh);
     } catch (e) {
@@ -87,11 +86,6 @@ export default function IncidentDetail() {
     } finally {
       setResolving(false);
     }
-  }
-
-  function onStatusChange(next) {
-    setSelStatus(next);
-    if (next === "resolved" && inc?.status !== "resolved") approveFix();
   }
 
   if (err)
@@ -201,21 +195,15 @@ export default function IncidentDetail() {
         <div className="space-y-4">
           <Panel title="Status Update">
             <div className="space-y-4 p-4">
+              {/* P0-e: removed silent no-op dropdown; show current status read-only */}
               <div>
-                <label className="mb-1.5 block text-[11px] uppercase tracking-wide text-gray-500">
-                  Set status
-                </label>
-                <select
-                  value={selStatus}
-                  onChange={(e) => onStatusChange(e.target.value)}
-                  className="w-full rounded-md border border-edge bg-ink/60 px-3 py-2 text-sm text-gray-200 outline-none focus:border-brand/60 capitalize"
-                >
-                  {STATUS_OPTIONS.map((s) => (
-                    <option key={s} value={s} className="capitalize">
-                      {s}
-                    </option>
-                  ))}
-                </select>
+                <div className="mb-1.5 text-[11px] uppercase tracking-wide text-gray-500">
+                  Current status
+                </div>
+                <div className="flex items-center gap-2">
+                  <StatusPill status={inc.status} />
+                  <span className="text-sm capitalize text-gray-300">{inc.status}</span>
+                </div>
               </div>
 
               <button
