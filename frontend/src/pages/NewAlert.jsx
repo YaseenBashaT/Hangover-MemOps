@@ -61,7 +61,13 @@ function trimToSentences(text, max = 3) {
   if (!text) return text;
   const parts = text.match(/[\s\S]*?[.!?]+\**(?=\s|$)/g);
   if (!parts) return text.trim();
-  return parts.slice(0, max).join("").trim();
+  // Drop a dangling list enumerator ("... issue. 2.") left behind when the
+  // cut lands right after the number of the next list item.
+  return parts
+    .slice(0, max)
+    .join("")
+    .trim()
+    .replace(/([.!?]\**)\s+\d+[.)]$/, "$1");
 }
 
 // P0-b (re-tuned for real similarity scores per NEXT_STEPS §3):
