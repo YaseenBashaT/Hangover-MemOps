@@ -35,7 +35,7 @@ MemOps uses Cognee 1.2.2 as its memory layer. Every call into Cognee lives behin
 
 **recall() traverses the graph when a new alert fires.** MemOps turns the alert text into a direct question and calls `recall()` with the GRAPH_COMPLETION search type. Cognee retrieves the connected triplets around the query and lets the model reason over them in a single completion. I made that a deliberate choice. Cognee's default routing can fan a query out into five or more model calls, and one call is enough once the graph is dense, so recall stays cheap and fast. The answer to a pool-exhaustion alert comes back naming the three payments-api incidents by their IDs, not summarizing connection pools in the abstract.
 
-**improve() strengthens fix patterns when an engineer approves.** Approving a fix calls `improve()` on the `incidents` dataset. Cognee re-runs its enrichment pipeline and re-indexes the triplet embeddings around the resolved incident and its neighbors. Those embeddings are computed locally with fastembed, so the step spends zero model tokens. MemOps reads back which service was strengthened, how many related incidents were touched, and the current node and edge counts, then the frontend lights up exactly those nodes on the dashboard graph.
+**improve() strengthens fix patterns when an engineer approves.** Approving a fix calls `improve()` on the `incidents` dataset. Cognee re-runs its enrichment pipeline and re-indexes the triplet embeddings around the resolved incident and its neighbors. Those embeddings are computed by HuggingFace's hosted inference API (`all-MiniLM-L6-v2`), which is separate from the Groq LLM, so the step spends zero LLM completion tokens. MemOps reads back which service was strengthened, how many related incidents were touched, and the current node and edge counts, then the frontend lights up exactly those nodes on the dashboard graph.
 
 **forget() prunes closed datasets.** When a dataset is done, `forget()` drops it from the graph. MemOps puts an explicit name check in front of the shared `incidents` dataset so a stray call cannot erase the seeded history by accident. This is the operation that keeps the memory from growing forever as old services get retired.
 
@@ -54,7 +54,7 @@ The LLM provider is a config value, not a hard dependency. It is read from envir
 
 ## Tech stack
 
-The backend is FastAPI. The memory layer is Cognee, which runs its LLM calls against Groq (`llama-3.3-70b-versatile`) and computes embeddings locally with fastembed, so the graph never needs rebuilding when the model changes. The graph itself lives in Cognee's embedded ladybug store. The frontend is React, built with Vite and styled with Tailwind. The graph view is D3.js, and it draws the real nodes and edges the backend returns rather than any canned layout.
+The backend is FastAPI. The memory layer is Cognee, which runs its LLM calls against Groq (`llama-3.3-70b-versatile`) and computes embeddings through HuggingFace's hosted inference API (`all-MiniLM-L6-v2`), which keeps the backend's memory footprint low enough to deploy on a small instance. The graph itself lives in Cognee's embedded ladybug store. The frontend is React, built with Vite and styled with Tailwind. The graph view is D3.js, and it draws the real nodes and edges the backend returns rather than any canned layout.
 
 ## Setup
 
@@ -82,8 +82,9 @@ LLM_API_KEY=your_groq_api_key
 LLM_PROVIDER=custom
 LLM_MODEL=openai/llama-3.3-70b-versatile
 LLM_ENDPOINT=https://api.groq.com/openai/v1
-EMBEDDING_PROVIDER=fastembed
-EMBEDDING_MODEL=BAAI/bge-small-en-v1.5
+HF_TOKEN=your_huggingface_read_token
+EMBEDDING_PROVIDER=huggingface
+EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
 EMBEDDING_DIMENSIONS=384
 ```
 
