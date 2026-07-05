@@ -8,6 +8,19 @@ import MemifyCard from "../components/MemifyCard.jsx";
 // that set only local state and reverted on refresh.
 // The Approve Fix button is the only way to resolve an incident.
 
+function fmtDate(ts) {
+  if (!ts) return "—";
+  try {
+    return new Date(ts).toLocaleDateString(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    });
+  } catch {
+    return ts;
+  }
+}
+
 function Field({ label, children }) {
   return (
     <div>
@@ -130,7 +143,7 @@ export default function IncidentDetail() {
                 <span className="capitalize">{inc.severity}</span>
               </Field>
               <Field label="Engineer">{inc.engineer_name}</Field>
-              <Field label="Date">{inc.timestamp}</Field>
+              <Field label="Date">{fmtDate(inc.timestamp)}</Field>
               <Field label="Resolution time">
                 {inc.resolution_time_minutes != null ? `${inc.resolution_time_minutes} min` : "—"}
               </Field>
@@ -195,7 +208,7 @@ export default function IncidentDetail() {
         <div className="space-y-4">
           <Panel title="Status Update">
             <div className="space-y-4 p-4">
-              {/* P0-e: removed silent no-op dropdown; show current status read-only */}
+              {/* P0-e: read-only status pill */}
               <div>
                 <div className="mb-1.5 text-[11px] uppercase tracking-wide text-gray-500">
                   Current status
@@ -206,20 +219,47 @@ export default function IncidentDetail() {
                 </div>
               </div>
 
-              <button
-                onClick={approveFix}
-                disabled={resolving}
-                className="flex w-full items-center justify-center gap-2 rounded-md bg-green-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-green-500 disabled:opacity-40"
-              >
-                {resolving && (
-                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
-                )}
-                {resolving ? "Reinforcing memory…" : "Approve Fix → Resolve & Reinforce"}
-              </button>
-              <p className="text-[11px] leading-relaxed text-gray-500">
-                Approving marks the incident resolved and runs{" "}
-                <span className="font-mono text-gray-400">improve()</span> to reinforce the graph.
-              </p>
+              {/* §4 NEXT_STEPS: gate the approve button on incident status */}
+              {inc.status === "resolved" ? (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 rounded-md border border-green-500/30 bg-green-500/10 px-3 py-2 text-sm text-green-300">
+                    <span>✓</span>
+                    <span>Fix approved — memory reinforced</span>
+                  </div>
+                  <button
+                    onClick={approveFix}
+                    disabled={resolving}
+                    className="flex w-full items-center justify-center gap-2 rounded-md border border-edge px-4 py-2 text-sm text-gray-400 transition hover:border-brand/50 hover:text-gray-200 disabled:opacity-40"
+                  >
+                    {resolving && (
+                      <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                    )}
+                    {resolving ? "Reinforcing…" : "Reinforce memory again"}
+                  </button>
+                  <p className="text-[11px] leading-relaxed text-gray-500">
+                    Re-runs{" "}
+                    <span className="font-mono text-gray-400">improve()</span> to
+                    re-index the subgraph.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <button
+                    onClick={approveFix}
+                    disabled={resolving}
+                    className="flex w-full items-center justify-center gap-2 rounded-md bg-green-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-green-500 disabled:opacity-40"
+                  >
+                    {resolving && (
+                      <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                    )}
+                    {resolving ? "Reinforcing memory…" : "Approve Fix → Resolve & Reinforce"}
+                  </button>
+                  <p className="text-[11px] leading-relaxed text-gray-500">
+                    Approving marks the incident resolved and runs{" "}
+                    <span className="font-mono text-gray-400">improve()</span> to reinforce the graph.
+                  </p>
+                </>
+              )}
               {resolveErr && <ErrorBox error={resolveErr} />}
             </div>
           </Panel>

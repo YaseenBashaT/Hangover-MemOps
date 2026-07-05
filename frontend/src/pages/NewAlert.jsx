@@ -64,15 +64,17 @@ function trimToSentences(text, max = 3) {
   return parts.slice(0, max).join("").trim();
 }
 
-// P0-b: Derive the "Different problem, same service" label dynamically.
+// P0-b (re-tuned for real similarity scores per NEXT_STEPS §3):
 // A card is a distractor if it shares the top card's service but its
-// match_score is well below the top score (< 45% of top).
+// match_score is well below the top score (< 75% of top).
+// With real cosine similarities (e.g. top=85, distractor=60), this fires;
+// with ordinal scores (100/90/80), the 0.45 threshold would never fire.
 function isDistractor(card, topCard) {
   if (!topCard || !card) return false;
   if (card.incident_id === topCard.incident_id) return false;
   return (
     card.service_affected === topCard.service_affected &&
-    card.match_score < topCard.match_score * 0.45
+    card.match_score < topCard.match_score * 0.75
   );
 }
 
