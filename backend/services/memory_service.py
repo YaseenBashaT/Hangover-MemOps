@@ -390,15 +390,28 @@ async def seed_if_empty() -> dict:
     delay = float(os.getenv("SEED_DELAY_SECONDS", "1.0"))
     print(f"[seed] ingesting {total} incidents… (delay {delay}s between each)", flush=True)
     for i, inc in enumerate(ALL_INCIDENTS, 1):
-        try:
-            await ingest_incident(inc)
-            print(f"[seed]   [{i:02d}/{total}] {inc['incident_id']} ok", flush=True)
-        except Exception as e:
-            # Surface the incident that broke and the error type, then abort so
-            # the caller/logs see a real failure instead of a half-empty graph.
-            print(f"[seed]   [{i:02d}/{total}] {inc['incident_id']} FAILED: "
-                  f"{type(e).__name__}: {e}", flush=True)
-            raise
+        # A fresh instance's first seed hits Cognee's LLM/embedding calls back
+        # to back for 17 incidents; a single transient API hiccup shouldn't
+        # abort the whole batch and leave the graph stuck half-seeded. Retry
+        # each incident a couple of times with backoff before giving up.
+        last_exc = None
+        for attempt in range(1, 4):
+            try:
+                await ingest_incident(inc)
+                print(f"[seed]   [{i:02d}/{total}] {inc['incident_id']} ok"
+                      + (f" (attempt {attempt})" if attempt > 1 else ""), flush=True)
+                last_exc = None
+                break
+            except Exception as e:
+                last_exc = e
+                print(f"[seed]   [{i:02d}/{total}] {inc['incident_id']} attempt "
+                      f"{attempt}/3 FAILED: {type(e).__name__}: {e}", flush=True)
+                if attempt < 3:
+                    await asyncio.sleep(3 * attempt)
+        if last_exc is not None:
+            # Every retry failed — surface it and abort so the caller/logs see
+            # a real failure instead of a silently half-empty graph.
+            raise last_exc
         if delay and i < total:
             await asyncio.sleep(delay)
     final = await count_incidents()
