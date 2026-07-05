@@ -58,7 +58,7 @@ The LLM provider is a config value, not a hard dependency. It is read from envir
 2. Look at the knowledge graph. Seventeen incident nodes, colored by severity, connected through services and fixes.
 3. Read one of the proactive insights on the right. Each names a service and cites real incident IDs.
 4. Click **New Alert** and paste: `payments-api is throwing connection pool errors, pool appears exhausted, service degraded`
-5. Click **Analyze**. Watch the three progress stages: embedding → graph traversal → synthesis. Results show the three payments-api incidents ranked by Cognee retrieval, the distractor (INC-2025-0118, different problem same service, scored far lower), and a suggested fix from the most recent resolution.
+5. Click **Analyze**. Watch the three progress stages: embedding → graph traversal → synthesis. Results show five related incidents ranked by real cosine similarity from Cognee's vector store (non-round match scores, not fabricated ordinals), and a suggested fix synthesized from the most relevant past resolution.
 6. Click **Approve Fix → Reinforce Memory**. The MemifyCard appears — expand "See what changed" to view the before/after recall evidence of what the graph learned.
 7. Watch the return to the dashboard. The reinforced nodes are highlighted green.
 8. Click **Log Incident** in the nav. Fill out the form and submit — watch a new node appear in the graph (`remember()` live).

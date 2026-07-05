@@ -598,15 +598,22 @@ async def _vector_engine_ranking(text: str, limit: int) -> tuple[list[dict], int
     this will raise an exception which the caller catches.
     """
     from cognee.infrastructure.databases.vector import get_vector_engine
+    from cognee.context_global_variables import set_database_global_context_variables
+    from cognee.modules.users.methods import get_default_user
 
-    engine = await get_vector_engine()
-
-    # Try the canonical collection name; Cognee 1.2.2 uses DocumentChunk_text.
-    # If the collection name differs, this will raise and fall back gracefully.
+    # get_vector_engine() returns a handle synchronously in the installed
+    # cognee==1.2.2 (not a coroutine) — awaiting it raises TypeError.
+    # Without the dataset context below it also resolves to the empty GLOBAL
+    # vector store rather than the incidents dataset's own lancedb file, so
+    # the search below always raised CollectionNotFoundError.
     collection_name = "DocumentChunk_text"
-    results = await engine.search(
-        collection_name, query_text=text, limit=max(limit * 3, 15)
-    )
+    user = await get_default_user()
+    async with set_database_global_context_variables(INCIDENTS_DATASET, user.id):
+        engine = get_vector_engine()
+        results = await engine.search(
+            collection_name, query_text=text, limit=max(limit * 3, 15),
+            include_payload=True,
+        )
 
     if not results:
         return [], 0
@@ -616,24 +623,10 @@ async def _vector_engine_ranking(text: str, limit: int) -> tuple[list[dict], int
     seen: dict[str, float] = {}  # incident_id -> best similarity
     ordered: list[str] = []
     for hit in results:
-        # Cognee search results carry a 'payload' dict and a 'score'.
-        # The score is cosine similarity (higher = more relevant).
-        # Some versions use distance (lower = more relevant); detect by name.
-        chunk_text = (
-            getattr(hit, "payload", {}).get("text", "")
-            or getattr(hit, "text", None)
-            or getattr(hit, "content", None)
-            or str(hit)
-        )
-        # Convert distance to similarity if the attribute is named 'distance'.
-        raw_score = getattr(hit, "score", None)
-        if raw_score is None:
-            raw_score = getattr(hit, "distance", None)
-            if raw_score is not None:
-                raw_score = max(0.0, 1.0 - float(raw_score))  # distance → similarity
-        if raw_score is None:
-            continue
-        similarity = float(raw_score)
+        # ScoredResult.payload carries the chunk text; .score is a cosine
+        # DISTANCE (lower = better match), not a similarity — convert it.
+        chunk_text = ((hit.payload or {}).get("text") or "") or str(hit)
+        similarity = max(0.0, 1.0 - float(hit.score))
 
         m = _INCIDENT_ID_RE.search(chunk_text)
         if not m:
@@ -1178,9 +1171,12 @@ def _split_insights(text: str) -> list[str]:
     items = [re.sub(r"\s+", " ", n).strip() for n in numbered]
 
     # Pattern 2: "Insight N:" or "**Insight N:**" headers (LLM sometimes returns these)
+    # Capture the header itself along with the body — _strip_insight_prefix
+    # below needs to see the leading "**" to pair it with the title's own
+    # closing "**" instead of leaving a stray, unbalanced marker.
     if not items:
         insight_blocks = re.findall(
-            r"(?ms)^\s*\**Insight\s+\d+[:\.]\**\s*(.+?)(?=^\s*\**Insight\s+\d+[:\.]|\Z)",
+            r"(?ms)^\s*(\**Insight\s+\d+[:\.]\**\s*.+?)(?=^\s*\**Insight\s+\d+[:\.]|\Z)",
             text,
             re.IGNORECASE,
         )
@@ -1205,7 +1201,14 @@ def _split_insights(text: str) -> list[str]:
 
     # Strip leading "Insight N:" / "**Insight N:**" prefixes — the UI numbers cards.
     def _strip_insight_prefix(s: str) -> str:
-        return re.sub(r"^\**Insight\s+\d+[:\.\s]+\**", "", s, flags=re.IGNORECASE).strip()
+        # Bolded header ("**Insight N: Title**: evidence") — replace the
+        # opening marker with a bare "**" so it pairs with the title's own
+        # closing "**" instead of leaving a stray, unbalanced marker.
+        bolded = re.sub(r"^\*\*insight\s+\d+[:.]\s*", "**", s, flags=re.IGNORECASE)
+        if bolded != s:
+            return bolded.strip()
+        # Plain "Insight N: ..." header (no bold) — strip entirely.
+        return re.sub(r"^insight\s+\d+[:.\s]+", "", s, flags=re.IGNORECASE).strip()
 
     items = [_strip_insight_prefix(i) for i in items]
     items = [_trim_insight(i) for i in items if i]
