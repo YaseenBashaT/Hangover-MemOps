@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, sevColor } from "../api.js";
 import { Panel, Spinner, ErrorBox, SeverityBadge, BoldText } from "../components/ui.jsx";
@@ -7,6 +7,36 @@ import MemifyCard from "../components/MemifyCard.jsx";
 
 const SAMPLE =
   "payments-api is throwing connection pool errors, pool appears exhausted, service degraded";
+
+// Persist the in-progress analysis across route changes (e.g. opening a
+// related incident then hitting browser back), which would otherwise unmount
+// this page and lose all local state.
+const STORAGE_KEY = "memops_new_alert_state";
+
+function loadPersisted() {
+  try {
+    const raw = sessionStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function savePersisted(state) {
+  try {
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    // ignore quota/serialization errors — persistence is best-effort
+  }
+}
+
+function clearPersisted() {
+  try {
+    sessionStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // ignore
+  }
+}
 
 function fmtDate(ts) {
   if (!ts) return "—";
@@ -34,15 +64,24 @@ function trimToSentences(text, max = 3) {
 
 export default function NewAlert() {
   const navigate = useNavigate();
-  const [text, setText] = useState("");
+  const persisted = loadPersisted();
+  const [text, setText] = useState(persisted?.text || "");
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState(null);
+  const [result, setResult] = useState(persisted?.result || null);
   const [err, setErr] = useState(null);
   const [approving, setApproving] = useState(false);
   const [memify, setMemify] = useState(null);
   const [approveErr, setApproveErr] = useState(null);
 
   const topIncident = result?.historical_context?.[0];
+
+  // Keep the raw alert text and its analysis around in sessionStorage so
+  // navigating to a related incident and back restores this exact view.
+  useEffect(() => {
+    if (result) {
+      savePersisted({ text, result });
+    }
+  }, [text, result]);
 
   async function analyze() {
     if (!text.trim()) return;
@@ -66,6 +105,7 @@ export default function NewAlert() {
     setErr(null);
     setMemify(null);
     setApproveErr(null);
+    clearPersisted();
   }
 
   async function approveFix() {
@@ -76,6 +116,7 @@ export default function NewAlert() {
       // Resolve the most relevant historical incident → triggers improve().
       const res = await api.resolveIncident(topIncident.incident_id);
       setMemify(res);
+      clearPersisted();
       // After the panel is shown, drop back to the dashboard and highlight the
       // nodes that were just reinforced so the graph visibly gets stronger.
       const reinforced = [
@@ -102,8 +143,8 @@ export default function NewAlert() {
         </p>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        {/* LEFT — raw alert */}
+      <div className="grid gap-4">
+        {/* Raw alert */}
         <Panel title="Raw Alert" className="flex flex-col">
           <div className="flex flex-1 flex-col gap-3 p-4">
             <textarea
@@ -130,7 +171,7 @@ export default function NewAlert() {
           </div>
         </Panel>
 
-        {/* RIGHT — analysis */}
+        {/* Recall analysis */}
         <Panel title="Recall Analysis" className="flex flex-col">
           <div className="flex-1 space-y-4 overflow-auto p-4">
             {!result && !loading && !err && (
