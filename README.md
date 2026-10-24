@@ -50,7 +50,7 @@ MemOps uses Cognee 1.2.2 as its memory layer. Every call into Cognee lives behin
 | `improve()` | Re-indexes graph triplets after a resolution; before/after evidence captured | **New Alert** or **Incident Detail** → Approve Fix |
 | `forget()` | Prunes a named dataset from graph memory | Demonstrated in the demo video against a scratch dataset |
 
-The LLM provider is a config value, not a hard dependency. It is read from environment variables in that same file, and MemOps runs on Groq's `llama-3.3-70b-versatile` right now. Switching to another OpenAI-compatible endpoint is a config change rather than a rewrite, because the embeddings stay local and the graph never has to be rebuilt.
+The LLM provider is a config value, read from environment variables in that same file. MemOps runs on Groq's `qwen/qwen3.8-27b` right now. It used `llama-3.3-70b-versatile` until Groq retired that model, and switching meant changing one environment variable. Any other OpenAI-compatible endpoint works the same way. Embeddings come from a separate model, so the graph doesn't need to be rebuilt.
 
 ## The demo
 
@@ -65,7 +65,7 @@ The LLM provider is a config value, not a hard dependency. It is read from envir
 
 ## Tech stack
 
-The backend is FastAPI. The memory layer is Cognee, which runs its LLM calls against Groq (`llama-3.3-70b-versatile`) and computes embeddings through HuggingFace's hosted inference API (`all-MiniLM-L6-v2`), which keeps the backend's memory footprint low enough to deploy on a small instance. The graph itself lives in Cognee's embedded ladybug store. The frontend is React, built with Vite and styled with Tailwind. The graph view is D3.js, and it draws the real nodes and edges the backend returns rather than any canned layout.
+The backend is FastAPI. The memory layer is Cognee, which runs its LLM calls against Groq (`qwen/qwen3.8-27b`) and computes embeddings through HuggingFace's hosted inference API (`all-MiniLM-L6-v2`), which keeps the backend's memory footprint low enough to deploy on a small instance. The graph itself lives in Cognee's embedded ladybug store. The frontend is React, built with Vite and styled with Tailwind. The graph view is D3.js, and it draws the real nodes and edges the backend returns rather than any canned layout.
 
 ## Setup
 
@@ -91,7 +91,7 @@ Configure the environment. Create a file named `.env` in the project root, and a
 ```
 LLM_API_KEY=your_groq_api_key
 LLM_PROVIDER=custom
-LLM_MODEL=openai/llama-3.3-70b-versatile
+LLM_MODEL=openai/qwen/qwen3.8-27b
 LLM_ENDPOINT=https://api.groq.com/openai/v1
 HF_TOKEN=your_huggingface_read_token
 EMBEDDING_PROVIDER=huggingface

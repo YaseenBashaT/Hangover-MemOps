@@ -59,7 +59,7 @@ def _configure_cognee() -> None:
 
     key, source = llm_key_info()
     provider = os.getenv("LLM_PROVIDER", "custom")
-    model = os.getenv("LLM_MODEL", "openai/llama-3.3-70b-versatile")
+    model = os.getenv("LLM_MODEL", "openai/qwen/qwen3.8-27b")
     endpoint = os.getenv("LLM_ENDPOINT", "https://api.groq.com/openai/v1")
     cognee.config.set_llm_provider(provider)
     cognee.config.set_llm_model(model)

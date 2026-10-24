@@ -35,7 +35,7 @@ ENV HOME=/tmp \
 # Non-secret app config (secrets LLM_API_KEY and HF_TOKEN come from the Space's
 # "Settings -> Variables and secrets", NOT baked into the image).
 ENV LLM_PROVIDER=custom \
-    LLM_MODEL=openai/llama-3.3-70b-versatile \
+    LLM_MODEL=openai/qwen/qwen3.8-27b \
     LLM_ENDPOINT=https://api.groq.com/openai/v1 \
     EMBEDDING_PROVIDER=huggingface \
     EMBEDDING_MODEL=huggingface/sentence-transformers/all-MiniLM-L6-v2 \
