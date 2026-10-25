@@ -592,11 +592,15 @@ async def recall_for_alert(alert_text: str) -> dict:
     primary = (
         f'A new production alert just fired: "{alert_text}". Based on the past '
         "incidents in memory, what is the most likely fix? Reference the specific "
-        "past incident IDs that resolved this before and describe the fix that worked."
+        "past incident IDs that resolved this before and describe the fix that worked. "
+        # The UI shows the first three sentences and only renders **bold**, so a
+        # table or bullet list (gpt-oss likes both) would show up as raw markdown.
+        "Answer in at most three plain sentences, with no tables, lists or headings."
     )
     fallback = (
         f'For this alert: "{alert_text}", name the past incidents on the affected '
-        "service and the fix that finally worked, citing the incident IDs."
+        "service and the fix that finally worked, citing the incident IDs. "
+        "Answer in at most three plain sentences."
     )
 
     async with _graph_lock:
