@@ -212,7 +212,7 @@ export default function Dashboard() {
                 </button>
               </div>
             )}
-            {(incidents?.incidents || []).slice(0, 12).map((i) => (
+            {(incidents?.incidents || []).map((i) => (
               <button
                 key={i.incident_id}
                 onClick={() => onIncidentClick(i.incident_id)}
