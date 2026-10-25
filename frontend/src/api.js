@@ -1,5 +1,9 @@
 // Single place that talks to the live FastAPI backend. No mock data anywhere.
-const BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000";
+// Production builds (including Vercel previews, which may not have
+// VITE_API_BASE set) fall back to the hosted backend.
+const BASE =
+  import.meta.env.VITE_API_BASE ||
+  (import.meta.env.PROD ? "https://beyanki-memops-api.hf.space" : "http://localhost:8000");
 
 async function req(path, options) {
   const res = await fetch(`${BASE}${path}`, {
