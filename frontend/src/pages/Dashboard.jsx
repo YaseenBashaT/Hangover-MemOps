@@ -4,6 +4,9 @@ import { api, sevColor, loadInsightsOnce } from "../api.js";
 import GraphView from "../components/GraphView.jsx";
 import { Panel, Spinner, ErrorBox, BoldText } from "../components/ui.jsx";
 
+// The Recent Incidents panel shows this many until "Show all" is clicked.
+const RECENT_LIMIT = 12;
+
 function Stat({ label, value, color }) {
   return (
     <div className="rounded-lg border border-edge bg-panel2/70 px-4 py-3">
@@ -77,6 +80,7 @@ export default function Dashboard() {
   const [showHighlight, setShowHighlight] = useState(true);
   const [highlightAt, setHighlightAt] = useState(location.state?.at || null);
   const [incidents, setIncidents] = useState(null);
+  const [showAllIncidents, setShowAllIncidents] = useState(false);
   const [graph, setGraph] = useState(null);
   const [insights, setInsights] = useState(null);
   const [err, setErr] = useState(null);
@@ -212,7 +216,7 @@ export default function Dashboard() {
                 </button>
               </div>
             )}
-            {(incidents?.incidents || []).map((i) => (
+            {(incidents?.incidents || []).slice(0, showAllIncidents ? undefined : RECENT_LIMIT).map((i) => (
               <button
                 key={i.incident_id}
                 onClick={() => onIncidentClick(i.incident_id)}
@@ -232,6 +236,16 @@ export default function Dashboard() {
                 </span>
               </button>
             ))}
+            {(incidents?.incidents || []).length > RECENT_LIMIT && (
+              <button
+                onClick={() => setShowAllIncidents((v) => !v)}
+                className="mt-1 w-full rounded-md px-2 py-1.5 text-left text-xs text-brand hover:bg-white/5"
+              >
+                {showAllIncidents
+                  ? "Show fewer"
+                  : `Show all ${incidents.incidents.length}`}
+              </button>
+            )}
           </div>
         </Panel>
       </aside>
