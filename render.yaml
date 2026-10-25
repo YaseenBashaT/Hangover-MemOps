@@ -27,7 +27,7 @@ services:
       - key: LLM_PROVIDER
         value: custom
       - key: LLM_MODEL
-        value: openai/openai/gpt-oss-120b
+        value: openai/openai/gpt-oss-20b
       - key: LLM_ENDPOINT
         value: https://api.groq.com/openai/v1
       - key: EMBEDDING_PROVIDER
@@ -36,6 +36,8 @@ services:
         value: huggingface/sentence-transformers/all-MiniLM-L6-v2
       - key: EMBEDDING_DIMENSIONS
         value: "384"
+      - key: CACHING
+        value: "false"
       - key: HF_TOKEN
         sync: false
       - key: ALLOWED_ORIGINS

@@ -16,6 +16,8 @@ import os
 import sys
 import json
 import asyncio
+import shutil
+import tarfile
 import traceback
 from datetime import datetime, timezone
 
@@ -66,7 +68,7 @@ def _configure_cognee() -> None:
 
     key, source = llm_key_info()
     provider = os.getenv("LLM_PROVIDER", "custom")
-    model = os.getenv("LLM_MODEL", "openai/openai/gpt-oss-120b")
+    model = os.getenv("LLM_MODEL", "openai/openai/gpt-oss-20b")
     endpoint = os.getenv("LLM_ENDPOINT", "https://api.groq.com/openai/v1")
     cognee.config.set_llm_provider(provider)
     cognee.config.set_llm_model(model)
@@ -200,6 +202,52 @@ _STORE_PATH = os.path.join(_DATA_DIR, "incidents_store.json")
 # restart — otherwise every restart would recompute them and, because the LLM
 # recall is non-deterministic, the dashboard would show different insights.
 _INSIGHTS_PATH = os.path.join(_DATA_DIR, "insights_cache.json")
+
+
+def _restore_prebuilt_snapshot() -> None:
+    """Unpack the prebuilt graph and store (see build_snapshot.py) on a fresh
+    instance, so a restart serves all 17 incidents in seconds instead of
+    reseeding them through the LLM for ~13 minutes.
+
+    Only runs when PREBUILT_SNAPSHOT points at an archive, the store is still
+    empty, and the archive was built for the same COGNEE_SYSTEM_ROOT and
+    MEMOPS_DATA_DIR: Cognee's database records absolute file paths, so a
+    snapshot unpacked anywhere else would point at files that don't exist.
+    Anything that doesn't match falls back to the normal seed."""
+    snapshot = os.getenv("PREBUILT_SNAPSHOT")
+    system_root = os.getenv("COGNEE_SYSTEM_ROOT")
+    if not snapshot or not system_root or os.path.exists(_STORE_PATH):
+        return
+    if not os.path.exists(snapshot):
+        print(f"[snapshot] {snapshot} not found -> seeding normally", flush=True)
+        return
+    try:
+        with tarfile.open(snapshot, "r:gz") as tar:
+            manifest = json.load(tar.extractfile("manifest.json"))
+            if (manifest["cognee_system_root"], manifest["memops_data_dir"]) != (system_root, _DATA_DIR):
+                print(f"[snapshot] built for {manifest['cognee_system_root']} + "
+                      f"{manifest['memops_data_dir']}, not {system_root} + {_DATA_DIR} "
+                      "-> seeding normally", flush=True)
+                return
+            for prefix, target in (("cognee_system/", system_root), ("memops_data/", _DATA_DIR)):
+                members = []
+                for m in tar.getmembers():
+                    if m.name.startswith(prefix):
+                        m.name = m.name[len(prefix):]
+                        members.append(m)
+                os.makedirs(target, exist_ok=True)
+                tar.extractall(target, members=members, filter="data")
+        print(f"[snapshot] restored {manifest['incidents']} incidents built "
+              f"{manifest['built_at']}", flush=True)
+    except Exception:
+        print("[snapshot] restore failed -> seeding normally", flush=True)
+        traceback.print_exc()
+        # Don't let the seed build on top of a half-unpacked database.
+        shutil.rmtree(system_root, ignore_errors=True)
+        shutil.rmtree(_DATA_DIR, ignore_errors=True)
+
+
+_restore_prebuilt_snapshot()
 _store_lock = asyncio.Lock()
 
 # Serializes ALL graph-touching Cognee operations (remember / recall / improve /

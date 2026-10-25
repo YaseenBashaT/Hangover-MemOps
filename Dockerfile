@@ -35,11 +35,13 @@ ENV HOME=/tmp \
 # Non-secret app config (secrets LLM_API_KEY and HF_TOKEN come from the Space's
 # "Settings -> Variables and secrets", NOT baked into the image).
 ENV LLM_PROVIDER=custom \
-    LLM_MODEL=openai/openai/gpt-oss-120b \
+    LLM_MODEL=openai/openai/gpt-oss-20b \
     LLM_ENDPOINT=https://api.groq.com/openai/v1 \
     EMBEDDING_PROVIDER=huggingface \
     EMBEDDING_MODEL=huggingface/sentence-transformers/all-MiniLM-L6-v2 \
-    EMBEDDING_DIMENSIONS=384
+    EMBEDDING_DIMENSIONS=384 \
+    CACHING=false \
+    PREBUILT_SNAPSHOT=/app/prebuilt/memops_snapshot.tar.gz
 
 # HuggingFace's default Space port. Seeding runs in the background at startup
 # (see backend/main.py lifespan), so the server binds here immediately.

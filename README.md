@@ -50,7 +50,7 @@ MemOps uses Cognee 1.2.2 as its memory layer. Every call into Cognee lives behin
 | `improve()` | Re-indexes graph triplets after a resolution; before/after evidence captured | **New Alert** or **Incident Detail** → Approve Fix |
 | `forget()` | Prunes a named dataset from graph memory | Demonstrated in the demo video against a scratch dataset |
 
-The LLM provider is a config value, read from environment variables in that same file. MemOps runs on Groq's `openai/gpt-oss-120b` right now. It used `llama-3.3-70b-versatile` until Groq retired that model, then briefly `qwen/qwen3.8-27b`, which Groq's free tier caps at 1,000 output tokens a minute. One graph extraction can ask for more than that, so every call sat waiting. Switching models means changing one environment variable, and any other OpenAI-compatible endpoint works the same way. Embeddings come from a separate model, so the graph doesn't need to be rebuilt.
+The LLM provider is a config value, read from environment variables in that same file. MemOps runs on Groq's `openai/gpt-oss-20b` right now. It used `llama-3.3-70b-versatile` until Groq retired that model, then briefly `qwen/qwen3.8-27b`, which Groq's free tier caps at 1,000 output tokens a minute. One graph extraction can ask for more than that, so every call sat waiting. Switching models means changing one environment variable, and any other OpenAI-compatible endpoint works the same way. Embeddings come from a separate model, so the graph doesn't need to be rebuilt.
 
 Groq's free tier also allows 8,000 tokens a minute per model, so MemOps keeps its prompts small. It turns off Cognee's session memory, which otherwise adds a second LLM call to every alert and carries earlier alerts into later answers, and it sends 8 graph triplets per recall instead of Cognee's default 15. An alert costs about 3,000 tokens and comes back in a few seconds. Both settings can be changed with the `CACHING` and `RECALL_TOP_K` environment variables.
 
@@ -67,7 +67,11 @@ Groq's free tier also allows 8,000 tokens a minute per model, so MemOps keeps it
 
 ## Tech stack
 
-The backend is FastAPI. The memory layer is Cognee, which runs its LLM calls against Groq (`openai/gpt-oss-120b`) and computes embeddings through HuggingFace's hosted inference API (`all-MiniLM-L6-v2`), which keeps the backend's memory footprint low enough to deploy on a small instance. The graph itself lives in Cognee's embedded ladybug store. The frontend is React, built with Vite and styled with Tailwind. The graph view is D3.js, and it draws the real nodes and edges the backend returns rather than any canned layout.
+The backend is FastAPI. The memory layer is Cognee, which runs its LLM calls against Groq (`openai/gpt-oss-20b`) and computes embeddings through HuggingFace's hosted inference API (`all-MiniLM-L6-v2`), which keeps the backend's memory footprint low enough to deploy on a small instance. The graph itself lives in Cognee's embedded ladybug store. The frontend is React, built with Vite and styled with Tailwind. The graph view is D3.js, and it draws the real nodes and edges the backend returns rather than any canned layout.
+
+## Fast restarts
+
+The Space keeps its data in `/tmp`, which is wiped on every restart. Seeding 17 incidents through the LLM takes about 13 minutes and uses close to a full day of Groq's free token quota, so the image ships a prebuilt snapshot instead. `prebuilt/memops_snapshot.tar.gz` holds the seeded Cognee graph, the incident store and the insights cache. On startup the backend unpacks it when the store is empty, and all 17 incidents are back within seconds. If the snapshot is missing or was built for other paths, the backend falls back to seeding. Rebuild it with `build_snapshot.py` after changing `seed.py` or the embedding model.
 
 ## Setup
 
@@ -93,7 +97,7 @@ Configure the environment. Create a file named `.env` in the project root, and a
 ```
 LLM_API_KEY=your_groq_api_key
 LLM_PROVIDER=custom
-LLM_MODEL=openai/openai/gpt-oss-120b
+LLM_MODEL=openai/openai/gpt-oss-20b
 LLM_ENDPOINT=https://api.groq.com/openai/v1
 HF_TOKEN=your_huggingface_read_token
 EMBEDDING_PROVIDER=huggingface
