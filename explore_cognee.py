@@ -8,7 +8,7 @@ load_dotenv()
 import cognee
 
 cognee.config.set_llm_provider("custom")
-cognee.config.set_llm_model("openai/qwen/qwen3.8-27b")
+cognee.config.set_llm_model("openai/openai/gpt-oss-120b")
 cognee.config.set_llm_endpoint("https://api.groq.com/openai/v1")
 cognee.config.set_llm_api_key(os.getenv("LLM_API_KEY"))
 cognee.config.set_embedding_provider("fastembed")

@@ -27,7 +27,7 @@ services:
       - key: LLM_PROVIDER
         value: custom
       - key: LLM_MODEL
-        value: openai/qwen/qwen3.8-27b
+        value: openai/openai/gpt-oss-120b
       - key: LLM_ENDPOINT
         value: https://api.groq.com/openai/v1
       - key: EMBEDDING_PROVIDER

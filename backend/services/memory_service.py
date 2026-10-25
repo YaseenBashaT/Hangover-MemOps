@@ -19,6 +19,13 @@ import asyncio
 import traceback
 from datetime import datetime, timezone
 
+# Cognee 1.x turns on session memory by default. Every recall() then makes an
+# extra LLM call to analyze the "conversation", and later answers get earlier
+# alerts' Q&A pasted into their prompt, so one visitor's alerts leak into the
+# next one's. MemOps answers each alert on its own, so switch it off before
+# cognee reads its config.
+os.environ.setdefault("CACHING", "false")
+
 import cognee
 from cognee.modules.search.types.SearchType import SearchType
 
@@ -59,7 +66,7 @@ def _configure_cognee() -> None:
 
     key, source = llm_key_info()
     provider = os.getenv("LLM_PROVIDER", "custom")
-    model = os.getenv("LLM_MODEL", "openai/qwen/qwen3.8-27b")
+    model = os.getenv("LLM_MODEL", "openai/openai/gpt-oss-120b")
     endpoint = os.getenv("LLM_ENDPOINT", "https://api.groq.com/openai/v1")
     cognee.config.set_llm_provider(provider)
     cognee.config.set_llm_model(model)
@@ -1065,8 +1072,17 @@ def _is_degenerate(answer: str) -> bool:
     return len(answer.strip()) < 40
 
 
+# How many graph triplets recall() puts in the prompt. Cognee's default of 15
+# sends ~5-6k tokens per alert and ~8k for the insights, which overflows Groq's
+# free 8k tokens-per-minute limit, so calls sat in retry backoff for minutes.
+# 8 keeps an alert near 3k tokens without losing the incidents it cites.
+_RECALL_TOP_K = int(os.getenv("RECALL_TOP_K", "8"))
+
+
 async def _recall_text(prompt: str) -> str:
-    results = await cognee.recall(prompt, query_type=SearchType.GRAPH_COMPLETION)
+    results = await cognee.recall(
+        prompt, query_type=SearchType.GRAPH_COMPLETION, top_k=_RECALL_TOP_K
+    )
     if results:
         r = results[0]
         return (getattr(r, "text", None) or getattr(r, "answer", None) or str(r)).strip()
