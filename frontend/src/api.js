@@ -83,6 +83,7 @@ export function fmtDate(ts) {
       year: "numeric",
       month: "short",
       day: "numeric",
+      timeZone: "UTC", // incident times are stored in UTC
     });
   } catch {
     return ts;

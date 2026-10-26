@@ -1,24 +1,23 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as d3 from "d3";
-import { sevColor } from "../api.js";
+import { fmtDate, humanize, sevColor } from "../api.js";
 
 const NODE_R = { critical: 12, high: 11, medium: 10, low: 9 };
-const LINK = "#B4C3BF";
+const LINK = "#AFC0BB";
 const LINK_HOT = "#0F6E6E";
+// soft island colors, kept away from the severity reds/ambers/greens
+const ISLANDS = ["#E1EEEB", "#E5E8F4", "#EEE6F2", "#E8ECEF", "#F1E9E4", "#E4EEF3", "#ECEAE0"];
+const NARROW = 640;
+const PAD = 24; // how far an island reaches past its dots
 
 /**
- * The memory map as service bubbles. Each service gets a circle sized by how
- * many incidents it has (d3.pack, so circles never overlap), its incidents sit
- * on a ring inside it, and a line joins two incidents that share details in
- * the Cognee graph (an error, a fix, a ticket, an engineer). The ~190 detail
- * nodes themselves aren't drawn; hovering an incident lists what it shares.
+ * The memory map as a little physics toy. Each service is an island and its
+ * incidents float on it, pulled toward the island's centre. A line joins two
+ * incidents that share details in the Cognee graph (an error, a fix, a ticket,
+ * an engineer), and those lines are weak springs: drag a dot and the islands
+ * stretch, and incidents it shares details with get tugged along.
  */
-// Phones are too narrow to pack the services into one circle, so there they
-// stack down the page at a fixed, readable size and the map grows taller.
-const NARROW = 640;
-const stackRadius = (count) => (count >= 4 ? 118 : count >= 2 ? 100 : 66);
-
-function buildLayout(data, width, height) {
+function buildModel(data) {
   const byId = new Map(data.nodes.map((n) => [n.id, n]));
   const incidents = data.nodes.filter((n) => n.node_kind === "incident");
 
@@ -31,71 +30,75 @@ function buildLayout(data, width, height) {
     if (details.has(t) && byId.get(s)?.type === "Entity") details.get(t).add(s);
   }
 
+  const links = [];
+  for (let a = 0; a < incidents.length; a++)
+    for (let b = a + 1; b < incidents.length; b++) {
+      const shared = [...details.get(incidents[a].id)].filter((x) => details.get(incidents[b].id).has(x));
+      if (shared.length)
+        links.push({ a: incidents[a].id, b: incidents[b].id, shared: shared.map((x) => byId.get(x).label) });
+    }
+
   const services = [...d3.group(incidents, (i) => i.service || "unknown")]
     .map(([name, items]) => ({ name, items }))
     .sort((a, b) => b.items.length - a.items.length);
-
-  // Each circle is sized for what it holds: room for its incidents on a ring
-  // and for the service name across the top.
-  const radiusFor = (svc) =>
-    Math.max(stackRadius(svc.items.length), svc.name.length * 3.6 + 14);
-
-  let circles;
-  let fit = { k: 1, x: 0, y: 0 };
-  if (width < NARROW) {
-    // phones: zig-zag down the page at full size
-    let y = 12;
-    circles = services.map((svc, k) => {
-      const r = radiusFor(svc);
-      const side = svc.items.length > 1 ? 0 : k % 2 ? 1 : -1;
-      const x = width / 2 + side * Math.max(0, width / 2 - r - 8);
-      const c = { data: svc, x, y: y + r, r };
-      y += svc.items.length > 1 || side === 1 ? 2 * r + 14 : r * 0.9;
-      return c;
-    });
-    height = Math.max(...circles.map((c) => c.y + c.r)) + 12;
-  } else {
-    circles = services.map((svc) => ({ data: svc, r: radiusFor(svc) + 9 }));
-    d3.packSiblings(circles);
-    circles.forEach((c) => (c.r -= 9)); // the 9px was just spacing between circles
-    // pack makes a round cluster; spread it sideways to suit a wide box
-    const stretch = Math.min(width / height, 1.6);
-    circles.forEach((c) => (c.x *= stretch));
-    const x0 = Math.min(...circles.map((c) => c.x - c.r));
-    const x1 = Math.max(...circles.map((c) => c.x + c.r));
-    const y0 = Math.min(...circles.map((c) => c.y - c.r));
-    const y1 = Math.max(...circles.map((c) => c.y + c.r));
-    const k = Math.min((width - 32) / (x1 - x0), (height - 32) / (y1 - y0), 1.3);
-    fit = { k, x: (width - k * (x1 - x0)) / 2 - k * x0, y: (height - k * (y1 - y0)) / 2 - k * y0 };
-  }
-
-  const nodes = [];
-  const bubbles = circles.map((b) => {
-    const { items, name } = b.data;
-    const ring = items.length === 1 ? 0 : Math.min(b.r * 0.5, 62);
-    items.forEach((inc, k) => {
-      const a = -Math.PI / 2 + (2 * Math.PI * k) / items.length;
-      nodes.push({ ...inc, x: b.x + ring * Math.cos(a), y: b.y + ring * Math.sin(a) + 16 });
-    });
-    return { name, x: b.x, y: b.y, r: b.r, count: items.length };
-  });
-
-  const pos = new Map(nodes.map((n) => [n.id, n]));
-  const links = [];
-  for (let a = 0; a < nodes.length; a++)
-    for (let b = a + 1; b < nodes.length; b++) {
-      const shared = [...details.get(nodes[a].id)].filter((x) => details.get(nodes[b].id).has(x));
-      if (shared.length) links.push({ a: nodes[a], b: nodes[b], shared: shared.map((x) => byId.get(x).label) });
-    }
-  return { nodes, bubbles, links, pos, height, fit };
+  return { incidents, links, services };
 }
 
-export default function GraphView({ data, onIncidentClick, highlightIds = [] }) {
+// Where each island sits. Wide screens pack them into the box; phones stack
+// them down the page and the map grows taller instead.
+function placeIslands(services, width, height) {
+  const radius = (n) => Math.sqrt(n) * 24 + 22;
+  if (width < NARROW) {
+    let y = 46;
+    const anchors = services.map((s, k) => {
+      const r = radius(s.items.length);
+      const x = width / 2 + (k % 2 ? 1 : -1) * Math.min(40, width / 2 - r - 12);
+      const a = { name: s.name, x, y: y + r, r, color: ISLANDS[k % ISLANDS.length] };
+      y += 2 * r + 58;
+      return a;
+    });
+    return { anchors, height: y, fit: { k: 1, x: 0, y: 0 } };
+  }
+  // the extra 26px leaves room for the island's name above it
+  const circles = services.map((s) => ({ name: s.name, r: radius(s.items.length) + 26 }));
+  d3.packSiblings(circles);
+  const stretch = Math.min(width / height, 1.7);
+  circles.forEach((c) => (c.x *= stretch));
+  const x0 = d3.min(circles, (c) => c.x - c.r);
+  const x1 = d3.max(circles, (c) => c.x + c.r);
+  const y0 = d3.min(circles, (c) => c.y - c.r);
+  const y1 = d3.max(circles, (c) => c.y + c.r);
+  const k = Math.min((width - 24) / (x1 - x0), (height - 24) / (y1 - y0), 1.7);
+  const fit = { k, x: (width - k * (x1 - x0)) / 2 - k * x0, y: (height - k * (y1 - y0)) / 2 - k * y0 };
+  const anchors = circles.map((c, k) => ({ name: c.name, x: c.x, y: c.y + 8, r: c.r - 26, color: ISLANDS[k % ISLANDS.length] }));
+  return { anchors, height, fit };
+}
+
+// A rounded outline around an island's dots: ring every dot with points, hull
+// them and draw the hull as a smooth closed curve.
+const blobLine = d3.line().curve(d3.curveCatmullRomClosed.alpha(0.6));
+function islandShape(members) {
+  const pts = [];
+  for (const m of members)
+    for (let i = 0; i < 10; i++) {
+      const a = (i / 10) * 2 * Math.PI;
+      pts.push([m.x + (m.r + PAD) * Math.cos(a), m.y + (m.r + PAD) * Math.sin(a)]);
+    }
+  const hull = d3.polygonHull(pts);
+  return { d: blobLine(hull), top: d3.min(hull, (p) => p[1]), cx: d3.mean(members, (m) => m.x) };
+}
+
+export default function GraphView({ data, meta, onIncidentClick, highlightIds = [], shownIds = null, latestId = null }) {
   const wrapRef = useRef(null);
   const svgRef = useRef(null);
+  const simRef = useRef(null);
+  const nodesRef = useRef(new Map()); // id -> the simulation's node object, kept across replays
+  const dragRef = useRef(null);
   const [size, setSize] = useState(null);
   const [zoom, setZoom] = useState(d3.zoomIdentity);
+  const [, setTick] = useState(0);
   const [hover, setHover] = useState(null);
+  const [selected, setSelected] = useState(null);
 
   useEffect(() => {
     const ro = new ResizeObserver(([e]) => setSize({ w: e.contentRect.width, h: e.contentRect.height }));
@@ -103,7 +106,12 @@ export default function GraphView({ data, onIncidentClick, highlightIds = [] }) 
     return () => ro.disconnect();
   }, []);
 
+  const model = useMemo(() => buildModel(data), [data]);
+  const place = useMemo(() => (size ? placeIslands(model.services, size.w, size.h) : null), [model, size]);
   const narrow = size ? size.w < NARROW : false;
+
+  // Zoom and pan on wide screens only (a phone needs its touch to scroll the
+  // page). Gestures that start on a dot drag the dot instead.
   useEffect(() => {
     const svg = d3.select(svgRef.current);
     if (narrow) {
@@ -111,126 +119,282 @@ export default function GraphView({ data, onIncidentClick, highlightIds = [] }) 
       setZoom(d3.zoomIdentity);
       return;
     }
-    svg.call(d3.zoom().scaleExtent([0.5, 3]).on("zoom", (e) => setZoom(e.transform)));
+    svg.call(
+      d3
+        .zoom()
+        .scaleExtent([0.5, 3])
+        .filter((e) => !e.target.closest?.("[data-node]") && (!e.ctrlKey || e.type === "wheel") && !e.button)
+        .on("zoom", (e) => setZoom(e.transform))
+    );
   }, [narrow]);
 
-  const layout = useMemo(() => (size ? buildLayout(data, size.w, size.h) : null), [data, size]);
-  const hi = new Set(highlightIds);
-
-  const linked = useMemo(() => {
-    if (!hover || !layout) return null;
-    const s = new Set([hover.id]);
-    layout.links.forEach((l) => {
-      if (l.a.id === hover.id) s.add(l.b.id);
-      if (l.b.id === hover.id) s.add(l.a.id);
+  // The simulation: dots are pulled to their island, pushed off each other,
+  // and weakly sprung to the incidents they share details with.
+  useEffect(() => {
+    if (!place) return;
+    const anchor = new Map(place.anchors.map((a) => [a.name, a]));
+    const visible = model.incidents.filter((i) => !shownIds || shownIds.has(i.id));
+    const nodes = visible.map((inc) => {
+      let n = nodesRef.current.get(inc.id);
+      const home = anchor.get(inc.service || "unknown");
+      if (!n) {
+        // new dots appear at their island's centre and burst out from there
+        n = { x: home.x + (Math.random() - 0.5) * 6, y: home.y + (Math.random() - 0.5) * 6 };
+        nodesRef.current.set(inc.id, n);
+      }
+      return Object.assign(n, inc, { r: NODE_R[inc.severity] || 8, home });
     });
-    return s;
-  }, [hover, layout]);
-  function linkPath(l, between, hot = false) {
-    // links between services curve gently; links inside one are straight
-    const bend = between ? 0.12 : 0;
-    const mx = (l.a.x + l.b.x) / 2 + (l.b.y - l.a.y) * bend;
-    const my = (l.a.y + l.b.y) / 2 - (l.b.x - l.a.x) * bend;
+    const ids = new Set(nodes.map((n) => n.id));
+    const links = model.links
+      .filter((l) => ids.has(l.a) && ids.has(l.b))
+      .map((l) => ({ ...l, source: l.a, target: l.b }));
+
+    const sim = (simRef.current ||= d3.forceSimulation().alphaDecay(0.03).velocityDecay(0.32));
+    sim
+      .nodes(nodes)
+      .force("x", d3.forceX((n) => n.home.x).strength(0.14))
+      .force("y", d3.forceY((n) => n.home.y).strength(0.14))
+      .force("collide", d3.forceCollide((n) => n.r + 9).strength(0.9).iterations(2))
+      .force(
+        "link",
+        d3
+          .forceLink(links)
+          .id((n) => n.id)
+          .distance((l) => (l.source.service === l.target.service ? 40 : 160))
+          .strength((l) => (l.source.service === l.target.service ? 0.12 : 0.012))
+      )
+      .on("tick", () => setTick((t) => t + 1))
+      .alpha(shownIds ? 0.6 : 1)
+      .restart();
+    return () => sim.stop();
+  }, [model, place, shownIds]);
+
+  useEffect(() => () => simRef.current?.stop(), []);
+
+  if (!size || !place) return <div ref={wrapRef} className="h-full w-full" />;
+
+  const nodes = [...(simRef.current?.nodes() || [])];
+  const nodeById = new Map(nodes.map((n) => [n.id, n]));
+  const links = model.links.filter((l) => nodeById.has(l.a) && nodeById.has(l.b));
+  const focus = selected && nodeById.has(selected) ? selected : hover;
+  const near = new Set(focus ? [focus] : []);
+  links.forEach((l) => {
+    if (l.a === focus) near.add(l.b);
+    if (l.b === focus) near.add(l.a);
+  });
+  const hi = new Set(highlightIds);
+  const showAllLabels = zoom.k * place.fit.k >= 1.45;
+
+  // screen point -> map point, undoing both the zoom and the fit
+  function toMap(e) {
+    const box = svgRef.current.getBoundingClientRect();
+    const [zx, zy] = zoom.invert([e.clientX - box.left, e.clientY - box.top]);
+    return [(zx - place.fit.x) / place.fit.k, (zy - place.fit.y) / place.fit.k];
+  }
+  function toScreen(n) {
+    return zoom.apply([place.fit.x + place.fit.k * n.x, place.fit.y + place.fit.k * n.y]);
+  }
+
+  function onPointerDown(e, n) {
+    e.stopPropagation();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    dragRef.current = { id: n.id, x: e.clientX, y: e.clientY, moved: false };
+    n.fx = n.x;
+    n.fy = n.y;
+  }
+  function onPointerMove(e, n) {
+    const d = dragRef.current;
+    if (!d || d.id !== n.id) return;
+    if (Math.hypot(e.clientX - d.x, e.clientY - d.y) > 4) d.moved = true;
+    if (!d.moved) return;
+    [n.fx, n.fy] = toMap(e);
+    simRef.current.alphaTarget(0.3).restart();
+  }
+  function onPointerUp(e, n) {
+    const d = dragRef.current;
+    dragRef.current = null;
+    n.fx = n.fy = null; // let go and it springs back home
+    simRef.current.alphaTarget(0);
+    if (d && !d.moved) setSelected((s) => (s === n.id ? null : n.id));
+  }
+
+  function linkPath(l, hot) {
+    let a = nodeById.get(l.a);
+    let b = nodeById.get(l.b);
+    if (hot && l.b === focus) [a, b] = [b, a]; // signals flow out of the focused dot
+    const between = a.service !== b.service;
+    const bend = between ? 0.14 : 0;
+    const mx = (a.x + b.x) / 2 + (b.y - a.y) * bend;
+    const my = (a.y + b.y) / 2 - (b.x - a.x) * bend;
     return (
       <path
-        key={`${l.a.id}-${l.b.id}${hot ? "-hot" : ""}`}
-        d={`M${l.a.x},${l.a.y} Q${mx},${my} ${l.b.x},${l.b.y}`}
+        key={`${l.a}-${l.b}${hot ? "-hot" : ""}`}
+        d={`M${a.x},${a.y} Q${mx},${my} ${b.x},${b.y}`}
         fill="none"
         stroke={hot ? LINK_HOT : LINK}
-        strokeWidth={hot ? 1.5 + l.shared.length * 0.5 : 1 + l.shared.length * 0.4}
+        strokeWidth={hot ? 2 + l.shared.length * 0.5 : 1 + l.shared.length * 0.35}
         strokeLinecap="round"
-        opacity={hot ? 1 : hover ? 0.25 : 0.9}
+        strokeDasharray={hot ? "2 9" : between ? "3 5" : undefined}
+        className={hot ? "graph-flow" : undefined}
+        opacity={hot ? 1 : focus ? 0.18 : between ? 0.7 : 0.9}
       />
     );
   }
-  const sharedWith = hover && layout ? layout.links.filter((l) => l.a.id === hover.id || l.b.id === hover.id) : [];
+
+  const sel = selected && nodeById.get(selected);
+  const card = sel || (hover && nodeById.get(hover));
+  const cardShares = card
+    ? links
+        .filter((l) => l.a === card.id || l.b === card.id)
+        .map((l) => ({ other: nodeById.get(l.a === card.id ? l.b : l.a), shared: l.shared }))
+    : [];
+  const info = card && meta?.get(card.incident_id);
+  const at = card && toScreen(card);
+  const cardStyle =
+    card && !narrow
+      ? {
+          left: Math.max(8, Math.min(at[0] + 28, size.w - 312)),
+          top: Math.max(8, Math.min(at[1] - 20, size.h - 260)),
+        }
+      : undefined;
 
   return (
-    <div ref={wrapRef} className="relative h-full w-full" style={narrow && layout ? { height: layout.height } : undefined}>
-      <svg ref={svgRef} className={`h-full w-full ${narrow ? "" : "touch-none"}`} role="img" aria-label="Incidents grouped by service, with lines between incidents that share details">
-        {layout && (
-          <g transform={zoom.toString()}>
-           <g transform={`translate(${layout.fit.x},${layout.fit.y}) scale(${layout.fit.k})`}>
-            {/* links between services run under the bubbles, so they only show in the gaps */}
-            {layout.links.filter((l) => l.a.service !== l.b.service).map((l) => linkPath(l, true))}
-
-            {layout.bubbles.map((b) => (
-              <g key={b.name}>
-                <circle cx={b.x} cy={b.y} r={b.r} fill="#FFFFFF" fillOpacity={0.94} stroke="#DADDD6" />
-                <text x={b.x} y={b.y - b.r + 27} textAnchor="middle" fontSize={13.5} fontWeight={700} fill="#14171F">
-                  {b.name}
-                </text>
-                <text x={b.x} y={b.y - b.r + 43} textAnchor="middle" fontSize={11.5} fill="#8E949D">
-                  {b.count === 1 ? "1 incident" : `${b.count} incidents`}
-                </text>
-              </g>
-            ))}
-
-            {layout.links.filter((l) => l.a.service === l.b.service).map((l) => linkPath(l, false))}
-            {/* the hovered incident's links go on top of everything */}
-            {hover && layout.links.filter((l) => l.a.id === hover.id || l.b.id === hover.id).map((l) => linkPath(l, l.a.service !== l.b.service, true))}
-
-            {layout.nodes.map((n) => {
-              const r = NODE_R[n.severity] || 8;
-              const faded = linked && !linked.has(n.id);
+    <div
+      ref={wrapRef}
+      className="relative h-full w-full select-none"
+      style={narrow ? { height: place.height } : undefined}
+    >
+      <svg
+        ref={svgRef}
+        className={`h-full w-full ${narrow ? "" : "touch-none cursor-grab active:cursor-grabbing"}`}
+        role="img"
+        aria-label="Incidents floating on islands, one per service, with lines between incidents that share details"
+        onClick={(e) => e.target === svgRef.current && setSelected(null)}
+      >
+        <g transform={zoom.toString()}>
+          <g transform={`translate(${place.fit.x},${place.fit.y}) scale(${place.fit.k})`}>
+            {place.anchors.map((a) => {
+              const members = nodes.filter((n) => n.home === a);
+              if (!members.length) return null;
+              const s = islandShape(members);
+              const lit = members.some((m) => near.has(m.id));
               return (
-                <g
-                  key={n.id}
-                  transform={`translate(${n.x},${n.y})`}
-                  opacity={faded ? 0.25 : 1}
-                  className="cursor-pointer"
-                  tabIndex={0}
-                  role="link"
-                  aria-label={`${n.incident_id} on ${n.service}`}
-                  onMouseEnter={() => setHover(n)}
-                  onMouseLeave={() => setHover(null)}
-                  onFocus={() => setHover(n)}
-                  onBlur={() => setHover(null)}
-                  onClick={() => onIncidentClick?.(n.incident_id)}
-                  onKeyDown={(e) => e.key === "Enter" && onIncidentClick?.(n.incident_id)}
-                >
-                  {hi.has(n.incident_id) && (
-                    <circle r={r + 7} fill="none" stroke={LINK_HOT} strokeWidth={2.5} className="graph-halo" />
-                  )}
-                  <circle r={r + 6} fill={sevColor(n.severity)} opacity={0.16} />
-                  <circle r={r} fill={sevColor(n.severity)} stroke="#FFFFFF" strokeWidth={2} />
-                  <text y={r + 19} textAnchor="middle" fontSize={11.5} fill="#5D6470" stroke="#FFFFFF" strokeWidth={3} paintOrder="stroke">
-                    {n.incident_id.replace(/^INC-/, "")}
+                <g key={a.name} onClick={() => setSelected(null)}>
+                  <path d={s.d} fill={a.color} stroke={lit ? "#9FB9B3" : "#D2D8D2"} strokeWidth={lit ? 1.5 : 1} />
+                  <text x={s.cx} y={s.top - 9} textAnchor="middle" fontSize={13} fontWeight={700} fill="#14171F">
+                    {a.name}
+                    <tspan fill="#8E949D" fontWeight={400}>
+                      {"  "}
+                      {members.length}
+                    </tspan>
                   </text>
                 </g>
               );
             })}
-           </g>
+
+            {links.filter((l) => l.a !== focus && l.b !== focus).map((l) => linkPath(l, false))}
+            {focus && links.filter((l) => l.a === focus || l.b === focus).map((l) => linkPath(l, true))}
+
+            {nodes.map((n) => {
+              const faded = focus && !near.has(n.id);
+              // neighbours stay unlabelled: they sit close together and the card names them
+              const label = showAllLabels || n.id === focus || n.id === latestId || hi.has(n.incident_id);
+              return (
+                <g
+                  key={n.id}
+                  data-node
+                  transform={`translate(${n.x},${n.y})`}
+                  opacity={faded ? 0.3 : 1}
+                  className="cursor-pointer touch-none"
+                  tabIndex={0}
+                  role="button"
+                  aria-label={`${n.incident_id} on ${n.service}`}
+                  aria-pressed={selected === n.id}
+                  onPointerDown={(e) => onPointerDown(e, n)}
+                  onPointerMove={(e) => onPointerMove(e, n)}
+                  onPointerUp={(e) => onPointerUp(e, n)}
+                  onPointerCancel={(e) => onPointerUp(e, n)}
+                  onMouseEnter={() => setHover(n.id)}
+                  onMouseLeave={() => setHover(null)}
+                  onFocus={() => setHover(n.id)}
+                  onBlur={() => setHover(null)}
+                  onKeyDown={(e) => e.key === "Enter" && setSelected((s) => (s === n.id ? null : n.id))}
+                >
+                  <g className="graph-pop">
+                    {(hi.has(n.incident_id) || n.id === latestId) && (
+                      <circle r={n.r + 8} fill="none" stroke={LINK_HOT} strokeWidth={2.5} className="graph-halo" />
+                    )}
+                    {selected === n.id && <circle r={n.r + 5} fill="none" stroke="#14171F" strokeWidth={2} />}
+                    <circle r={n.r + 5} fill={sevColor(n.severity)} opacity={0.18} />
+                    <circle r={n.r} fill={sevColor(n.severity)} stroke="#FFFFFF" strokeWidth={2} />
+                    {label && (
+                      <text
+                        y={n.r + 17}
+                        textAnchor="middle"
+                        fontSize={11}
+                        fill="#14171F"
+                        stroke="#FFFFFF"
+                        strokeWidth={3}
+                        paintOrder="stroke"
+                      >
+                        {n.incident_id.replace(/^INC-/, "")}
+                      </text>
+                    )}
+                  </g>
+                </g>
+              );
+            })}
           </g>
-        )}
+        </g>
       </svg>
 
-      {hover && (
+      {card && (
         <div
-          className="pointer-events-none absolute z-10 w-72 border border-rule bg-white px-3 py-2.5 text-sm shadow-md"
-          style={{
-            left: Math.max(4, Math.min(zoom.applyX(layout.fit.x + layout.fit.k * hover.x) + 16, (size?.w || 0) - 292)),
-            top: zoom.applyY(layout.fit.y + layout.fit.k * hover.y) + 16,
-          }}
+          className={
+            narrow
+              ? "fixed inset-x-3 bottom-3 z-20 border border-rule bg-white px-3 py-2.5 text-sm shadow-md"
+              : `absolute z-10 w-[19rem] border border-rule bg-white px-3 py-2.5 text-sm shadow-md ${sel ? "" : "pointer-events-none"}`
+          }
+          style={cardStyle}
         >
-          <div className="font-bold">{hover.incident_id}</div>
-          <div className="text-muted">{hover.service}</div>
-          {sharedWith.length > 0 ? (
-            <ul className="mt-2 space-y-1 border-t border-rule pt-2">
-              {sharedWith.map((l) => {
-                const other = l.a.id === hover.id ? l.b : l.a;
-                return (
-                  <li key={other.id}>
-                    Shares <span className="font-bold">{l.shared.join(", ")}</span> with{" "}
-                    <span className="whitespace-nowrap">{other.incident_id}</span>
-                  </li>
-                );
-              })}
+          <div className="flex items-baseline justify-between gap-2">
+            <span className="font-bold">{card.incident_id}</span>
+            <span className="text-xs capitalize" style={{ color: sevColor(card.severity) }}>
+              {card.severity}
+            </span>
+          </div>
+          {info && <div className="mt-0.5">{humanize(info.alert_name)}</div>}
+          <div className="text-muted">
+            {card.service}
+            {info?.timestamp && ` · ${fmtDate(info.timestamp)}`}
+          </div>
+          {cardShares.length > 0 ? (
+            <ul className="mt-2 max-h-40 space-y-1 overflow-auto border-t border-rule pt-2">
+              {cardShares.map(({ other, shared }) => (
+                <li key={other.id}>
+                  Shares <span className="font-bold">{shared.join(", ")}</span> with{" "}
+                  <span className="whitespace-nowrap">{other.incident_id}</span>
+                </li>
+              ))}
             </ul>
           ) : (
             <div className="mt-1 text-muted">Shares no details with other incidents yet.</div>
           )}
-          <div className="mt-2 text-xs text-muted">Click to open</div>
+          {sel ? (
+            <div className="mt-2 flex items-center justify-between">
+              <button
+                className="font-bold text-teal underline-offset-4 hover:underline"
+                onClick={() => onIncidentClick?.(card.incident_id)}
+              >
+                Open incident →
+              </button>
+              <button className="text-xs text-muted hover:text-ink" onClick={() => setSelected(null)}>
+                Close
+              </button>
+            </div>
+          ) : (
+            <div className="mt-2 text-xs text-muted">Click to pin, drag to pull it around</div>
+          )}
         </div>
       )}
     </div>
