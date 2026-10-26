@@ -1,82 +1,57 @@
 import { useEffect, useState } from "react";
-import { useParams, useNavigate, Link } from "react-router-dom";
-import { api, sevColor } from "../api.js";
-import { Panel, Spinner, ErrorBox, SeverityBadge, StatusPill } from "../components/ui.jsx";
-import MemifyCard from "../components/MemifyCard.jsx";
+import { useParams, useLocation, Link } from "react-router-dom";
+import { api, fmtDate, humanize, sevColor } from "../api.js";
+import { Button, ButtonSpinner, ErrorNote, Severity, Spinner, Status } from "../components/ui.jsx";
 
-// STATUS_OPTIONS dropdown removed (P0-e): it was a silent no-op
-// that set only local state and reverted on refresh.
-// The Approve Fix button is the only way to resolve an incident.
-
-function fmtDate(ts) {
-  if (!ts) return "—";
-  try {
-    return new Date(ts).toLocaleDateString(undefined, {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    });
-  } catch {
-    return ts;
-  }
-}
-
-function Field({ label, children }) {
-  return (
-    <div>
-      <div className="text-[11px] uppercase tracking-wide text-gray-500">{label}</div>
-      <div className="mt-0.5 text-sm text-gray-200">{children}</div>
-    </div>
-  );
+// "[03:16] sarah.chen: on it" -> { time, who, text }
+function parseSlackLine(line) {
+  const m = String(line).match(/^\[([^\]]+)\]\s*([^:]+):\s*(.*)$/);
+  return m ? { time: m[1], who: m[2].trim(), text: m[3] } : { time: "", who: "", text: line };
 }
 
 function Section({ title, children }) {
   return (
-    <div className="rounded-lg border border-edge bg-panel2/50 p-4">
-      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
-        {title}
-      </div>
-      {children}
+    <section className="mt-10 first:mt-0">
+      <h2 className="text-lg font-bold">{title}</h2>
+      <div className="mt-3">{children}</div>
+    </section>
+  );
+}
+
+function Fact({ label, children }) {
+  return (
+    <div className="flex justify-between gap-4 py-2">
+      <dt className="text-muted">{label}</dt>
+      <dd className="text-right">{children}</dd>
     </div>
   );
 }
 
 export default function IncidentDetail() {
   const { id } = useParams();
-  const navigate = useNavigate();
+  const location = useLocation();
   const [inc, setInc] = useState(null);
   const [err, setErr] = useState(null);
   const [related, setRelated] = useState([]);
-  const [resolving, setResolving] = useState(false);
-  const [memify, setMemify] = useState(null);
-  const [resolveErr, setResolveErr] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [learned, setLearned] = useState(null);
+  const [saveErr, setSaveErr] = useState(null);
 
   useEffect(() => {
     let alive = true;
     setInc(null);
     setErr(null);
-    setMemify(null);
+    setLearned(null);
     setRelated([]);
     (async () => {
       try {
         const data = await api.getIncident(id);
         if (!alive) return;
         setInc(data);
-        // related incidents = same service (the graph connects them via the
-        // shared service entity) — pulled live, no mock data.
-        try {
-          const all = await api.listIncidents();
-          if (alive)
-            setRelated(
-              (all.incidents || []).filter(
-                (x) =>
-                  x.service_affected === data.service_affected &&
-                  x.incident_id !== data.incident_id
-              )
-            );
-        } catch {
-          /* related is best-effort */
-        }
+        // Same-service incidents: the graph links them through the shared service.
+        const all = await api.listIncidents().catch(() => null);
+        if (alive && all)
+          setRelated(all.incidents.filter((x) => x.service_affected === data.service_affected && x.incident_id !== id));
       } catch (e) {
         if (alive) setErr(e.message);
       }
@@ -86,216 +61,168 @@ export default function IncidentDetail() {
     };
   }, [id]);
 
-  async function approveFix() {
-    setResolving(true);
-    setResolveErr(null);
+  async function relearn() {
+    setSaving(true);
+    setSaveErr(null);
     try {
-      const res = await api.resolveIncident(id);
-      setMemify(res);
-      const fresh = await api.getIncident(id);
-      setInc(fresh);
+      setLearned(await api.resolveIncident(id));
+      setInc(await api.getIncident(id));
     } catch (e) {
-      setResolveErr(e.message);
+      setSaveErr(e.message);
     } finally {
-      setResolving(false);
+      setSaving(false);
     }
   }
 
+  const back = (
+    <Link to="/incidents" className="text-[15px] text-teal underline-offset-4 hover:underline">
+      All incidents
+    </Link>
+  );
+
   if (err)
     return (
-      <div className="mx-auto max-w-3xl px-5 py-8">
-        <ErrorBox error={err} hint="Is the backend running on :8000?" />
-        <Link to="/" className="mt-4 inline-block text-sm text-brand hover:underline">
-          ← Back to dashboard
-        </Link>
+      <div className="mx-auto max-w-page px-4 py-10 sm:px-6">
+        {back}
+        <div className="mt-6 max-w-prose">
+          <ErrorNote error={err} hint={`MemOps couldn't load ${id}. It may not exist, or the backend is restarting.`} />
+        </div>
       </div>
     );
 
   if (!inc)
     return (
-      <div className="mx-auto max-w-3xl px-5 py-8">
+      <div className="mx-auto max-w-page px-4 py-10 sm:px-6">
         <Spinner label={`Loading ${id}…`} />
       </div>
     );
 
   const jira = inc.jira_ticket || {};
+  const slack = (inc.slack_thread || []).map(parseSlackLine);
+  const open = inc.status !== "resolved";
 
   return (
-    <div className="mx-auto max-w-[1400px] px-5 py-6">
-      <button onClick={() => navigate(-1)} className="mb-3 text-sm text-gray-400 hover:text-white">
-        ← Back
-      </button>
+    <div className="mx-auto max-w-page px-4 pb-20 pt-8 sm:px-6">
+      {back}
+      {location.state?.added && (
+        <p className="mt-4 max-w-prose bg-teal-wash px-4 py-3 text-teal-dark" role="status">
+          Added to memory. Alerts that look like this one will now find it.
+        </p>
+      )}
 
-      <div className="mb-4 flex flex-wrap items-center gap-3">
-        <h1 className="font-mono text-2xl font-semibold text-white">{inc.incident_id}</h1>
-        <SeverityBadge severity={inc.severity} />
-        <StatusPill status={inc.status} />
-        <span className="text-sm text-gray-400">{inc.alert_name}</span>
-      </div>
+      <header className="mt-5 border-b border-rule pb-6">
+        <h1 className="text-[2.25rem] font-bold leading-tight">{humanize(inc.alert_name)}</h1>
+        <div className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-1 text-[15px] text-muted">
+          <span>{inc.incident_id}</span>
+          <span>{inc.service_affected}</span>
+          <span>{fmtDate(inc.timestamp)}</span>
+          <Severity severity={inc.severity} />
+          <Status status={inc.status} />
+        </div>
+      </header>
 
-      <div className="grid gap-4 lg:grid-cols-[1fr_340px]">
-        {/* LEFT — full incident info */}
-        <div className="space-y-4">
-          <Panel title="Overview">
-            <div className="grid grid-cols-2 gap-4 p-4 sm:grid-cols-3">
-              <Field label="Service">{inc.service_affected}</Field>
-              <Field label="Severity">
-                <span className="capitalize">{inc.severity}</span>
-              </Field>
-              <Field label="Engineer">{inc.engineer_name}</Field>
-              <Field label="Date">{fmtDate(inc.timestamp)}</Field>
-              <Field label="Resolution time">
-                {inc.resolution_time_minutes != null ? `${inc.resolution_time_minutes} min` : "—"}
-              </Field>
-              <Field label="Outcome">
-                <span className="capitalize">{inc.outcome}</span>
-              </Field>
-            </div>
-          </Panel>
+      <div className="mt-8 grid gap-12 lg:grid-cols-[1fr_18rem]">
+        <article className="min-w-0 max-w-[44rem]">
+          <Section title="How it was fixed">
+            <p className="border-l-4 border-teal pl-5 text-[1.2rem] leading-relaxed">{inc.fix_applied}</p>
+          </Section>
 
-          <Section title="Error Log">
-            <pre className="overflow-auto rounded-md bg-ink/70 p-3 font-mono text-xs text-red-300">
+          <Section title="What broke">
+            <pre className="overflow-x-auto whitespace-pre-wrap break-words bg-ink px-4 py-3 font-mono text-[13px] leading-relaxed text-[#F2B8B5]">
               {inc.error_log}
             </pre>
           </Section>
 
-          <Section title="Fix Applied">
-            <p className="text-sm leading-relaxed text-gray-200">{inc.fix_applied}</p>
-          </Section>
-
-          {(inc.slack_thread || []).length > 0 && (
-            <Section title="Slack Thread">
-              <div className="space-y-1.5">
-                {inc.slack_thread.map((line, i) => (
-                  <div key={i} className="rounded-md bg-ink/50 px-3 py-1.5 font-mono text-xs text-gray-300">
-                    {line}
-                  </div>
-                ))}
-              </div>
-            </Section>
-          )}
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Section title="Jira Ticket">
-              {jira.id ? (
-                <div className="space-y-1">
-                  <div className="font-mono text-sm text-brand">{jira.id}</div>
-                  <div className="text-sm text-gray-200">{jira.title}</div>
-                  <div className="text-xs text-gray-400">{jira.resolution}</div>
-                </div>
-              ) : (
-                <div className="text-sm text-gray-500">None</div>
-              )}
-            </Section>
-
-            <Section title="Git Commits">
-              {(inc.git_commits || []).length ? (
-                <div className="space-y-1.5">
-                  {inc.git_commits.map((c, i) => (
-                    <div key={i} className="rounded-md bg-ink/50 px-2.5 py-1.5 font-mono text-xs text-green-300">
-                      {c}
+          {slack.length > 0 && (
+            <Section title="How it unfolded">
+              <ol className="relative border-l border-rule">
+                {slack.map((m, i) => (
+                  <li key={i} className="relative pb-4 pl-6 last:pb-0">
+                    <span className="absolute -left-[5px] top-2 h-2.5 w-2.5 rounded-full border-2 border-paper bg-muted" aria-hidden />
+                    <div className="text-sm text-muted">
+                      <span className="tabular-nums">{m.time}</span>
+                      {m.who && <span className="ml-2 font-bold text-ink">{m.who}</span>}
                     </div>
+                    <p className="text-[15px]">{m.text}</p>
+                  </li>
+                ))}
+              </ol>
+            </Section>
+          )}
+
+          {(jira.id || (inc.git_commits || []).length > 0) && (
+            <Section title="Ticket and code changes">
+              {jira.id && (
+                <p className="text-[15px]">
+                  <span className="font-bold">{jira.id}</span> {jira.title}
+                  {jira.resolution && <span className="block text-sm text-muted">{jira.resolution}</span>}
+                </p>
+              )}
+              {(inc.git_commits || []).length > 0 && (
+                <ul className="mt-3 space-y-1.5">
+                  {inc.git_commits.map((c, i) => (
+                    <li key={i} className="font-mono text-[13px] text-[#2F5F3A]">{c}</li>
                   ))}
-                </div>
-              ) : (
-                <div className="text-sm text-gray-500">None</div>
+                </ul>
               )}
             </Section>
-          </div>
-        </div>
-
-        {/* RIGHT — status + related + memify */}
-        <div className="space-y-4">
-          <Panel title="Status Update">
-            <div className="space-y-4 p-4">
-              {/* P0-e: read-only status pill */}
-              <div>
-                <div className="mb-1.5 text-[11px] uppercase tracking-wide text-gray-500">
-                  Current status
-                </div>
-                <div className="flex items-center gap-2">
-                  <StatusPill status={inc.status} />
-                  <span className="text-sm capitalize text-gray-300">{inc.status}</span>
-                </div>
-              </div>
-
-              {/* §4 NEXT_STEPS: gate the approve button on incident status */}
-              {inc.status === "resolved" ? (
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 rounded-md border border-green-500/30 bg-green-500/10 px-3 py-2 text-sm text-green-300">
-                    <span>✓</span>
-                    <span>Fix approved — memory reinforced</span>
-                  </div>
-                  <button
-                    onClick={approveFix}
-                    disabled={resolving}
-                    className="flex w-full items-center justify-center gap-2 rounded-md border border-edge px-4 py-2 text-sm text-gray-400 transition hover:border-brand/50 hover:text-gray-200 disabled:opacity-40"
-                  >
-                    {resolving && (
-                      <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
-                    )}
-                    {resolving ? "Reinforcing…" : "Reinforce memory again"}
-                  </button>
-                  <p className="text-[11px] leading-relaxed text-gray-500">
-                    Re-runs{" "}
-                    <span className="font-mono text-gray-400">improve()</span> to
-                    re-index the subgraph.
-                  </p>
-                </div>
-              ) : (
-                <>
-                  <button
-                    onClick={approveFix}
-                    disabled={resolving}
-                    className="flex w-full items-center justify-center gap-2 rounded-md bg-green-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-green-500 disabled:opacity-40"
-                  >
-                    {resolving && (
-                      <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
-                    )}
-                    {resolving ? "Reinforcing memory…" : "Approve Fix → Resolve & Reinforce"}
-                  </button>
-                  <p className="text-[11px] leading-relaxed text-gray-500">
-                    Approving marks the incident resolved and runs{" "}
-                    <span className="font-mono text-gray-400">improve()</span> to reinforce the graph.
-                  </p>
-                </>
-              )}
-              {resolveErr && <ErrorBox error={resolveErr} />}
-            </div>
-          </Panel>
-
-          <Panel title={`Related Incidents (${related.length})`}>
-            <div className="max-h-72 space-y-2 overflow-auto p-3">
-              {related.length === 0 && (
-                <div className="px-1 text-sm text-gray-500">
-                  No other incidents on this service.
-                </div>
-              )}
-              {related.map((r) => (
-                <button
-                  key={r.incident_id}
-                  onClick={() => navigate(`/incidents/${r.incident_id}`)}
-                  className="flex w-full items-center gap-2 rounded-md border border-edge bg-panel2/60 px-3 py-2 text-left transition hover:border-brand/50"
-                >
-                  <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: sevColor(r.severity) }} />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate font-mono text-xs text-gray-200">
-                      {r.incident_id}
-                    </span>
-                    <span className="block truncate text-[11px] text-gray-500">
-                      {r.alert_name}
-                    </span>
-                  </span>
-                  <StatusPill status={r.status} />
-                </button>
-              ))}
-            </div>
-          </Panel>
-
-          {memify && (
-            <MemifyCard result={memify} onOpenRelated={(rid) => navigate(`/incidents/${rid}`)} />
           )}
-        </div>
+        </article>
+
+        <aside className="space-y-10">
+          <dl className="divide-y divide-rule border-y border-rule text-[15px]">
+            <Fact label="Engineer">{inc.engineer_name || "Unknown"}</Fact>
+            <Fact label="Time to fix">
+              {inc.resolution_time_minutes != null ? `${inc.resolution_time_minutes} min` : "Not recorded"}
+            </Fact>
+            <Fact label="Outcome"><span className="capitalize">{inc.outcome}</span></Fact>
+          </dl>
+
+          <div>
+            {learned ? (
+              <p className="bg-teal-wash px-4 py-3 text-sm text-teal-dark" role="status">
+                Saved. MemOps re-learned this incident
+                {learned.graph_strengthened?.edges_after != null &&
+                  ` (${learned.graph_strengthened.edges_before} to ${learned.graph_strengthened.edges_after} links)`}
+                .
+              </p>
+            ) : (
+              <>
+                <Button variant={open ? "primary" : "quiet"} onClick={relearn} disabled={saving} className="w-full">
+                  {saving && <ButtonSpinner />}
+                  {saving ? "Saving" : open ? "Mark as fixed" : "Re-learn this incident"}
+                </Button>
+                <p className="mt-2 text-sm text-muted">
+                  {open
+                    ? "Records the fix above as what worked, so MemOps suggests it next time."
+                    : "Runs this incident through memory again to strengthen its links."}
+                </p>
+              </>
+            )}
+            {saveErr && <div className="mt-3"><ErrorNote error={saveErr} /></div>}
+          </div>
+
+          <div>
+            <h2 className="text-lg font-bold">Also on {inc.service_affected}</h2>
+            {related.length === 0 ? (
+              <p className="mt-2 text-[15px] text-muted">No other incidents on this service.</p>
+            ) : (
+              <ul className="mt-2 divide-y divide-rule border-y border-rule">
+                {related.map((r) => (
+                  <li key={r.incident_id}>
+                    <Link to={`/incidents/${r.incident_id}`} className="flex items-start gap-3 py-2.5 hover:text-teal">
+                      <span className="mt-2 h-2 w-2 shrink-0 rounded-full" style={{ background: sevColor(r.severity) }} aria-hidden />
+                      <span>
+                        <span className="block text-[15px] font-bold">{humanize(r.alert_name)}</span>
+                        <span className="block text-sm text-muted">{r.incident_id}, {fmtDate(r.timestamp)}</span>
+                      </span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </aside>
       </div>
     </div>
   );

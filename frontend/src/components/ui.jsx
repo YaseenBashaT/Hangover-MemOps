@@ -7,7 +7,7 @@ export function BoldText({ text }) {
     <>
       {parts.map((p, i) =>
         p.startsWith("**") && p.endsWith("**") ? (
-          <strong key={i} className="font-semibold text-gray-100">
+          <strong key={i} className="font-bold">
             {p.slice(2, -2)}
           </strong>
         ) : (
@@ -18,66 +18,68 @@ export function BoldText({ text }) {
   );
 }
 
-export function Panel({ title, right, children, className = "" }) {
-  return (
-    <div
-      className={`rounded-xl border border-edge bg-panel/60 ${className}`}
-    >
-      {(title || right) && (
-        <div className="flex items-center justify-between border-b border-edge px-4 py-3">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-300">
-            {title}
-          </h2>
-          {right}
-        </div>
-      )}
-      {children}
-    </div>
-  );
-}
-
 export function Spinner({ label = "Loading…" }) {
   return (
-    <div className="flex items-center gap-2 text-sm text-gray-400">
-      <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-gray-600 border-t-brand" />
+    <div className="flex items-center gap-2 text-sm text-muted" role="status">
+      <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-rule border-t-teal" />
       {label}
     </div>
   );
 }
 
-export function ErrorBox({ error, hint }) {
+// Errors say what failed and what to do; they never apologize.
+export function ErrorNote({
+  error,
+  title = "Couldn't reach MemOps",
+  hint = "The backend may be restarting. Try again in a minute.",
+}) {
   return (
-    <div className="rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-300">
-      <div className="font-semibold">Couldn’t reach the backend</div>
-      <div className="mt-1 text-red-200/80">{String(error)}</div>
-      {hint && <div className="mt-1 text-xs text-red-200/60">{hint}</div>}
+    <div className="border-l-4 border-sev-critical bg-white px-4 py-3 text-sm" role="alert">
+      <div className="font-bold text-sev-critical">{title}</div>
+      <div className="mt-0.5 text-muted">{hint}</div>
+      {error && <div className="mt-1 font-mono text-xs text-faint">{String(error)}</div>}
     </div>
   );
 }
 
-export function SeverityBadge({ severity }) {
-  const c = sevColor(severity);
+export function Severity({ severity }) {
   return (
-    <span
-      className="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium"
-      style={{ background: `${c}22`, color: c, border: `1px solid ${c}55` }}
-    >
-      <span className="h-1.5 w-1.5 rounded-full" style={{ background: c }} />
-      <span className="capitalize">{severity || "n/a"}</span>
+    <span className="inline-flex items-center gap-1.5 text-sm capitalize" style={{ color: sevColor(severity) }}>
+      <span className="h-2 w-2 rounded-full" style={{ background: sevColor(severity) }} aria-hidden />
+      {severity || "unknown"}
     </span>
   );
 }
 
-export function StatusPill({ status }) {
-  const resolved = status === "resolved";
-  const c = resolved ? "#22c55e" : "#eab308";
+export function Status({ status }) {
+  const open = status !== "resolved";
   return (
-    <span
-      className="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium"
-      style={{ background: `${c}22`, color: c, border: `1px solid ${c}55` }}
-    >
-      <span className="h-1.5 w-1.5 rounded-full" style={{ background: c }} />
-      <span className="capitalize">{status || "open"}</span>
+    <span className={`text-sm ${open ? "font-bold text-sev-medium" : "text-muted"}`}>
+      {open ? "Open" : "Resolved"}
     </span>
   );
+}
+
+const BTN = {
+  primary:
+    "bg-teal text-white hover:bg-teal-dark disabled:bg-teal/40",
+  quiet:
+    "border border-rule bg-white text-ink hover:border-ink/40 disabled:text-faint",
+  text: "text-teal underline-offset-4 hover:underline disabled:text-faint",
+};
+
+export function Button({ variant = "primary", className = "", children, ...props }) {
+  const pad = variant === "text" ? "" : "px-4 py-2";
+  return (
+    <button
+      className={`inline-flex items-center justify-center gap-2 rounded-md text-[15px] font-bold transition-colors disabled:cursor-not-allowed ${pad} ${BTN[variant]} ${className}`}
+      {...props}
+    >
+      {children}
+    </button>
+  );
+}
+
+export function ButtonSpinner() {
+  return <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />;
 }
