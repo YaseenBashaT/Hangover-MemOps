@@ -15,7 +15,8 @@ const PAD = 24; // how far an island reaches past its dots
  * incidents float on it, pulled toward the island's centre. A line joins two
  * incidents that share details in the Cognee graph (an error, a fix, a ticket,
  * an engineer), and those lines are weak springs: drag a dot and the islands
- * stretch, and incidents it shares details with get tugged along.
+ * stretch, incidents it shares details with get tugged along, and the dot
+ * settles partway between where it was and where it was dropped.
  */
 function buildModel(data) {
   const byId = new Map(data.nodes.map((n) => [n.id, n]));
@@ -128,6 +129,11 @@ export default function GraphView({ data, meta, onIncidentClick, highlightIds = 
     );
   }, [narrow]);
 
+  // A dot's resting spot is its island's centre plus wherever it has been
+  // dragged to (ox, oy), so moved dots stay moved after a resize or a replay.
+  const targetX = (n) => n.home.x + (n.ox || 0);
+  const targetY = (n) => n.home.y + (n.oy || 0);
+
   // The simulation: dots are pulled to their island, pushed off each other,
   // and weakly sprung to the incidents they share details with.
   useEffect(() => {
@@ -152,8 +158,8 @@ export default function GraphView({ data, meta, onIncidentClick, highlightIds = 
     const sim = (simRef.current ||= d3.forceSimulation().alphaDecay(0.03).velocityDecay(0.32));
     sim
       .nodes(nodes)
-      .force("x", d3.forceX((n) => n.home.x).strength(0.14))
-      .force("y", d3.forceY((n) => n.home.y).strength(0.14))
+      .force("x", d3.forceX(targetX).strength(0.14))
+      .force("y", d3.forceY(targetY).strength(0.14))
       .force("collide", d3.forceCollide((n) => n.r + 9).strength(0.9).iterations(2))
       .force(
         "link",
@@ -183,6 +189,10 @@ export default function GraphView({ data, meta, onIncidentClick, highlightIds = 
     if (l.b === focus) near.add(l.a);
   });
   const hi = new Set(highlightIds);
+  const islands = place.anchors
+    .map((a) => ({ a, members: nodes.filter((n) => n.home === a) }))
+    .filter((i) => i.members.length)
+    .map((i) => ({ ...i, s: islandShape(i.members), lit: i.members.some((m) => near.has(m.id)) }));
   const showAllLabels = zoom.k * place.fit.k >= 1.45;
 
   // screen point -> map point, undoing both the zoom and the fit
@@ -198,7 +208,7 @@ export default function GraphView({ data, meta, onIncidentClick, highlightIds = 
   function onPointerDown(e, n) {
     e.stopPropagation();
     e.currentTarget.setPointerCapture(e.pointerId);
-    dragRef.current = { id: n.id, x: e.clientX, y: e.clientY, moved: false };
+    dragRef.current = { id: n.id, x: e.clientX, y: e.clientY, sx: n.x, sy: n.y, moved: false };
     n.fx = n.x;
     n.fy = n.y;
   }
@@ -207,14 +217,24 @@ export default function GraphView({ data, meta, onIncidentClick, highlightIds = 
     if (!d || d.id !== n.id) return;
     if (Math.hypot(e.clientX - d.x, e.clientY - d.y) > 4) d.moved = true;
     if (!d.moved) return;
-    [n.fx, n.fy] = toMap(e);
+    // the dot resists: it only covers about two thirds of the way to the pointer
+    const [mx, my] = toMap(e);
+    n.fx = d.sx + (mx - d.sx) * 0.7;
+    n.fy = d.sy + (my - d.sy) * 0.7;
     simRef.current.alphaTarget(0.3).restart();
   }
   function onPointerUp(e, n) {
     const d = dragRef.current;
     dragRef.current = null;
-    n.fx = n.fy = null; // let go and it springs back home
-    simRef.current.alphaTarget(0);
+    if (d?.moved) {
+      // let go and it settles most of the way to where it was dropped
+      n.ox = (n.ox || 0) + (n.fx - targetX(n)) * 0.75;
+      n.oy = (n.oy || 0) + (n.fy - targetY(n)) * 0.75;
+      simRef.current.force("x").x(targetX);
+      simRef.current.force("y").y(targetY);
+    }
+    n.fx = n.fy = null;
+    simRef.current.alphaTarget(0).alpha(0.3).restart();
     if (d && !d.moved) setSelected((s) => (s === n.id ? null : n.id));
   }
 
@@ -273,24 +293,38 @@ export default function GraphView({ data, meta, onIncidentClick, highlightIds = 
       >
         <g transform={zoom.toString()}>
           <g transform={`translate(${place.fit.x},${place.fit.y}) scale(${place.fit.k})`}>
-            {place.anchors.map((a) => {
-              const members = nodes.filter((n) => n.home === a);
-              if (!members.length) return null;
-              const s = islandShape(members);
-              const lit = members.some((m) => near.has(m.id));
-              return (
-                <g key={a.name} onClick={() => setSelected(null)}>
-                  <path d={s.d} fill={a.color} stroke={lit ? "#9FB9B3" : "#D2D8D2"} strokeWidth={lit ? 1.5 : 1} />
-                  <text x={s.cx} y={s.top - 9} textAnchor="middle" fontSize={13} fontWeight={700} fill="#14171F">
-                    {a.name}
-                    <tspan fill="#8E949D" fontWeight={400}>
-                      {"  "}
-                      {members.length}
-                    </tspan>
-                  </text>
-                </g>
-              );
-            })}
+            {islands.map(({ a, s, lit }) => (
+              <path
+                key={a.name}
+                d={s.d}
+                fill={a.color}
+                stroke={lit ? "#9FB9B3" : "#D2D8D2"}
+                strokeWidth={lit ? 1.5 : 1}
+                onClick={() => setSelected(null)}
+              />
+            ))}
+            {/* names go over every island, since a stretched island can reach a neighbour's name */}
+            {islands.map(({ a, s, members }) => (
+              <text
+                key={a.name}
+                x={s.cx}
+                y={s.top - 9}
+                textAnchor="middle"
+                fontSize={13}
+                fontWeight={700}
+                fill="#14171F"
+                stroke="#FBFBF9"
+                strokeWidth={4}
+                paintOrder="stroke"
+                className="pointer-events-none"
+              >
+                {a.name}
+                <tspan fill="#8E949D" fontWeight={400}>
+                  {"  "}
+                  {members.length}
+                </tspan>
+              </text>
+            ))}
 
             {links.filter((l) => l.a !== focus && l.b !== focus).map((l) => linkPath(l, false))}
             {focus && links.filter((l) => l.a === focus || l.b === focus).map((l) => linkPath(l, true))}
