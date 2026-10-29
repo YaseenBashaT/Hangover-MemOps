@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { api, fmtDate, humanize } from "../api.js";
 import { BoldText, Button, ButtonSpinner, ErrorNote, Severity } from "../components/ui.jsx";
@@ -9,7 +9,7 @@ const SAMPLES = [
   ["Stripe webhooks", "billing-service stripe webhooks failing signature verification"],
 ];
 
-// Shown on the pager while the ~10s analysis runs.
+// Shown in the terminal while the ~10s analysis runs.
 const STAGES = ["Reading the alert", "Searching past incidents", "Writing up the fix"];
 
 // Keep the alert and its answer when the visitor clicks into an incident and back.
@@ -52,23 +52,30 @@ function verdict(result) {
   return "This has happened before.";
 }
 
-function Pager({ text, setText, loading, stage, onAsk }) {
-  const ref = useRef(null);
+function Terminal({ text, setText, loading, stage, onAsk }) {
   return (
-    <div className="rounded-2xl bg-pager-body p-2.5 shadow-[0_1px_0_#ffffff10_inset,0_8px_24px_-12px_#14171f80] sm:p-3.5">
-      <div className="rounded-lg bg-pager-lcd px-4 py-3 shadow-[inset_0_2px_6px_#00000040] sm:px-5 sm:py-4">
+    <div className="overflow-hidden rounded-xl border border-term-line bg-term-bg shadow-[0_12px_32px_-16px_rgb(2_6_23/0.6)]">
+      <div className="flex items-center justify-between border-b border-term-line px-4 py-2 font-mono text-xs text-term-dim">
+        <span>on-call / new alert</span>
+        <span className={loading ? "text-term-text" : ""}>{loading ? "searching memory" : "ready"}</span>
+      </div>
+      <div className="px-4 py-4 font-mono sm:px-5">
         {loading ? (
-          <div className="min-h-[7.5rem] font-lcd text-[1.65rem] leading-tight text-pager-text" aria-live="polite">
-            <div className="text-pager-dim">&gt; {text}</div>
-            <div className="mt-2">
-              {STAGES[stage]}…<span className="lcd-cursor">█</span>
-            </div>
+          <div className="min-h-[7rem] text-[15px] leading-relaxed" aria-live="polite">
+            <div className="text-term-dim">$ {text}</div>
+            {STAGES.slice(0, stage + 1).map((s, i) => (
+              <div key={s} className="mt-1 text-term-text">
+                <span className="text-term-dim">{i < stage ? "done " : "...  "}</span>
+                {s}
+                {i === stage && <span className="term-cursor">_</span>}
+              </div>
+            ))}
           </div>
         ) : (
-          <label className="block">
+          <label className="flex gap-3">
+            <span className="select-none pt-px text-[15px] text-term-dim" aria-hidden>$</span>
             <span className="sr-only">Alert text</span>
             <textarea
-              ref={ref}
               value={text}
               onChange={(e) => setText(e.target.value)}
               onKeyDown={(e) => {
@@ -77,16 +84,16 @@ function Pager({ text, setText, loading, stage, onAsk }) {
                   onAsk();
                 }
               }}
-              rows={3}
-              placeholder="> paste the alert that just fired"
-              className="block min-h-[7.5rem] w-full resize-none bg-transparent font-lcd text-[1.65rem] leading-tight text-pager-text outline-none placeholder:text-pager-dim"
+              rows={4}
+              placeholder="paste the alert that just fired"
+              className="block min-h-[7rem] w-full resize-none bg-transparent text-[15px] leading-relaxed text-term-text caret-term-text outline-none placeholder:text-term-dim"
             />
           </label>
         )}
       </div>
-      <div className="flex items-center justify-between gap-3 px-1 pt-2.5 sm:pt-3">
-        <span className="text-xs text-[#9aa1ab]">Enter to ask</span>
-        <Button onClick={onAsk} disabled={loading || !text.trim()} className="disabled:bg-[#3b4048] disabled:text-[#7d838c]">
+      <div className="flex items-center justify-between gap-3 border-t border-term-line px-4 py-2.5">
+        <span className="font-mono text-xs text-term-dim">Enter to ask<span className="hidden sm:inline">, Shift+Enter for a new line</span></span>
+        <Button onClick={onAsk} disabled={loading || !text.trim()} className="whitespace-nowrap disabled:bg-term-line disabled:text-term-dim">
           {loading && <ButtonSpinner />}
           {loading ? "Searching" : "Ask memory"}
         </Button>
@@ -110,7 +117,7 @@ function Answer({ result, onUse, using, learned, useErr }) {
       )}
 
       {result.suggested_fix && (
-        <div className="mt-6 max-w-prose border-l-4 border-teal pl-5">
+        <div className="mt-6 max-w-prose border-l-4 border-accent pl-5">
           <p className="text-[1.2rem] leading-relaxed">
             <BoldText text={trimToSentences(result.suggested_fix, 3)} />
           </p>
@@ -130,15 +137,15 @@ function Answer({ result, onUse, using, learned, useErr }) {
       )}
       {useErr && <div className="mt-4 max-w-prose"><ErrorNote error={useErr} /></div>}
       {learned && (
-        <div className="mt-6 max-w-prose bg-teal-wash px-5 py-4" role="status">
-          <p className="font-bold text-teal-dark">Saved. MemOps re-learned {learned.incident_id}.</p>
+        <div className="mt-6 max-w-prose bg-accent-wash px-5 py-4" role="status">
+          <p className="font-bold text-accent-strong">Saved. MemOps re-learned {learned.incident_id}.</p>
           <p className="mt-1 text-sm text-muted">
             Its graph went from {learned.graph_strengthened?.edges_before} to{" "}
             {learned.graph_strengthened?.edges_after} links
             {(learned.reinforced_connections || []).length > 0 &&
               `, connected to ${learned.reinforced_connections.length} other incidents on ${top?.service_affected}`}
             .{" "}
-            <Link to="/map" state={{ reinforced: [learned.incident_id], at: Date.now() }} className="text-teal underline underline-offset-4">
+            <Link to="/map" state={{ reinforced: [learned.incident_id], at: Date.now() }} className="text-accent underline underline-offset-4">
               See it on the memory map
             </Link>
           </p>
@@ -153,9 +160,9 @@ function Answer({ result, onUse, using, learned, useErr }) {
               <li key={c.incident_id}>
                 <Link
                   to={`/incidents/${c.incident_id}`}
-                  className="grid grid-cols-[3.5rem_1fr] gap-4 px-4 py-4 hover:bg-white sm:grid-cols-[4.5rem_1fr]"
+                  className="grid grid-cols-[3.5rem_1fr] gap-4 px-4 py-4 hover:bg-raise sm:grid-cols-[4.5rem_1fr]"
                 >
-                  <span className="pt-0.5 text-right text-xl font-bold tabular-nums text-teal">
+                  <span className="pt-0.5 text-right font-mono text-lg font-semibold text-accent">
                     {c.match_score}%
                   </span>
                   <span className="min-w-0">
@@ -163,7 +170,7 @@ function Answer({ result, onUse, using, learned, useErr }) {
                       <span className="font-bold">{humanize(c.alert_name)}</span>
                       <Severity severity={c.severity} />
                     </span>
-                    <span className="mt-0.5 block text-sm text-muted">
+                    <span className="mt-0.5 block font-mono text-[13px] text-muted">
                       {c.incident_id}, {c.service_affected}, {fmtDate(c.timestamp)}
                     </span>
                     {c.fix_applied && <span className="mt-1.5 block text-[15px]">Fix: {c.fix_applied}</span>}
@@ -246,17 +253,18 @@ export default function Ask() {
   return (
     <div className="mx-auto max-w-page px-4 pb-20 pt-10 sm:px-6 sm:pt-14">
       <div className="max-w-[46rem]">
-        <h1 className="text-[2.25rem] font-bold leading-[1.1] sm:text-[2.75rem]">What's firing?</h1>
+        <p className="font-mono text-xs uppercase tracking-[0.18em] text-accent">Incident memory</p>
+        <h1 className="mt-2 text-[2.25rem] font-semibold leading-[1.1] tracking-tight sm:text-[2.75rem]">What's firing?</h1>
         <p className="mt-3 max-w-prose text-[1.075rem] text-muted">
           Paste an alert. MemOps looks through every incident your team has resolved and
           tells you what fixed it last time.{" "}
-          <Link to="/about" className="text-teal underline-offset-4 hover:underline">
+          <Link to="/about" className="text-accent underline-offset-4 hover:underline">
             New here?
           </Link>
         </p>
 
         <div className="mt-8">
-          <Pager text={text} setText={setText} loading={loading} stage={stage} onAsk={() => ask()} />
+          <Terminal text={text} setText={setText} loading={loading} stage={stage} onAsk={() => ask()} />
         </div>
 
         <div className="mt-4 flex flex-wrap items-center gap-2">
@@ -266,7 +274,7 @@ export default function Ask() {
               key={label}
               onClick={() => ask(alert)}
               disabled={loading}
-              className="rounded-full border border-rule bg-white px-3 py-1 text-sm hover:border-teal hover:text-teal disabled:opacity-50"
+              className="rounded-md border border-rule bg-sheet px-2.5 py-1 font-mono text-[13px] text-muted transition-colors hover:border-accent hover:text-accent disabled:opacity-50"
             >
               {label}
             </button>

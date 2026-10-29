@@ -53,17 +53,11 @@ export function loadInsightsOnce() {
   return _insightsPromise;
 }
 
-// Shared severity palette (matches tailwind.config sev.* and the memory map).
-export const SEV_COLORS = {
-  critical: "#C93C3C",
-  high: "#C2611C",
-  medium: "#B7791F",
-  low: "#2F855A",
-  none: "#8E949D",
-};
+// Severity colors are theme variables (index.css), shared with tailwind's sev.* and the memory map.
+const SEVERITIES = new Set(["critical", "high", "medium", "low"]);
 
 export function sevColor(sev) {
-  return SEV_COLORS[sev] || SEV_COLORS.none;
+  return `rgb(var(--sev-${SEVERITIES.has(sev) ? sev : "none"}))`;
 }
 
 const ACRONYMS = new Set(["api", "cpu", "db", "dns", "http", "oom", "sms", "ssl", "tls", "url"]);

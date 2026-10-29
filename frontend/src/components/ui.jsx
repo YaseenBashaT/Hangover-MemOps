@@ -21,7 +21,7 @@ export function BoldText({ text }) {
 export function Spinner({ label = "Loading…" }) {
   return (
     <div className="flex items-center gap-2 text-sm text-muted" role="status">
-      <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-rule border-t-teal" />
+      <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-rule border-t-accent" />
       {label}
     </div>
   );
@@ -34,7 +34,7 @@ export function ErrorNote({
   hint = "The backend may be restarting. Try again in a minute.",
 }) {
   return (
-    <div className="border-l-4 border-sev-critical bg-white px-4 py-3 text-sm" role="alert">
+    <div className="border-l-4 border-sev-critical bg-sheet px-4 py-3 text-sm" role="alert">
       <div className="font-bold text-sev-critical">{title}</div>
       <div className="mt-0.5 text-muted">{hint}</div>
       {error && <div className="mt-1 font-mono text-xs text-faint">{String(error)}</div>}
@@ -62,10 +62,10 @@ export function Status({ status }) {
 
 const BTN = {
   primary:
-    "bg-teal text-white hover:bg-teal-dark disabled:bg-teal/40",
+    "bg-accent text-accent-on hover:bg-accent-strong disabled:bg-accent/40",
   quiet:
-    "border border-rule bg-white text-ink hover:border-ink/40 disabled:text-faint",
-  text: "text-teal underline-offset-4 hover:underline disabled:text-faint",
+    "border border-rule bg-sheet text-ink hover:border-ink/40 disabled:text-faint",
+  text: "text-accent underline-offset-4 hover:underline disabled:text-faint",
 };
 
 export function Button({ variant = "primary", className = "", children, ...props }) {
@@ -81,5 +81,5 @@ export function Button({ variant = "primary", className = "", children, ...props
 }
 
 export function ButtonSpinner() {
-  return <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />;
+  return <span className="h-4 w-4 animate-spin rounded-full border-2 border-accent-on/40 border-t-accent-on" />;
 }

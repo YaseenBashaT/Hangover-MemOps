@@ -75,7 +75,7 @@ export default function IncidentDetail() {
   }
 
   const back = (
-    <Link to="/incidents" className="text-[15px] text-teal underline-offset-4 hover:underline">
+    <Link to="/incidents" className="text-[15px] text-accent underline-offset-4 hover:underline">
       All incidents
     </Link>
   );
@@ -105,15 +105,15 @@ export default function IncidentDetail() {
     <div className="mx-auto max-w-page px-4 pb-20 pt-8 sm:px-6">
       {back}
       {location.state?.added && (
-        <p className="mt-4 max-w-prose bg-teal-wash px-4 py-3 text-teal-dark" role="status">
+        <p className="mt-4 max-w-prose bg-accent-wash px-4 py-3 text-accent-strong" role="status">
           Added to memory. Alerts that look like this one will now find it.
         </p>
       )}
 
       <header className="mt-5 border-b border-rule pb-6">
-        <h1 className="text-[2.25rem] font-bold leading-tight">{humanize(inc.alert_name)}</h1>
+        <h1 className="text-[2.25rem] font-semibold tracking-tight leading-tight">{humanize(inc.alert_name)}</h1>
         <div className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-1 text-[15px] text-muted">
-          <span>{inc.incident_id}</span>
+          <span className="font-mono text-[14px]">{inc.incident_id}</span>
           <span>{inc.service_affected}</span>
           <span>{fmtDate(inc.timestamp)}</span>
           <Severity severity={inc.severity} />
@@ -124,11 +124,11 @@ export default function IncidentDetail() {
       <div className="mt-8 grid gap-12 lg:grid-cols-[1fr_18rem]">
         <article className="min-w-0 max-w-[44rem]">
           <Section title="How it was fixed">
-            <p className="border-l-4 border-teal pl-5 text-[1.2rem] leading-relaxed">{inc.fix_applied}</p>
+            <p className="border-l-4 border-accent pl-5 text-[1.2rem] leading-relaxed">{inc.fix_applied}</p>
           </Section>
 
           <Section title="What broke">
-            <pre className="overflow-x-auto whitespace-pre-wrap break-words bg-ink px-4 py-3 font-mono text-[13px] leading-relaxed text-[#F2B8B5]">
+            <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded-lg border border-term-line bg-term-bg px-4 py-3 font-mono text-[13px] leading-relaxed text-[#FCA5A5]">
               {inc.error_log}
             </pre>
           </Section>
@@ -161,7 +161,7 @@ export default function IncidentDetail() {
               {(inc.git_commits || []).length > 0 && (
                 <ul className="mt-3 space-y-1.5">
                   {inc.git_commits.map((c, i) => (
-                    <li key={i} className="font-mono text-[13px] text-[#2F5F3A]">{c}</li>
+                    <li key={i} className="font-mono text-[13px] text-accent">{c}</li>
                   ))}
                 </ul>
               )}
@@ -180,7 +180,7 @@ export default function IncidentDetail() {
 
           <div>
             {learned ? (
-              <p className="bg-teal-wash px-4 py-3 text-sm text-teal-dark" role="status">
+              <p className="bg-accent-wash px-4 py-3 text-sm text-accent-strong" role="status">
                 Saved. MemOps re-learned this incident
                 {learned.graph_strengthened?.edges_after != null &&
                   ` (${learned.graph_strengthened.edges_before} to ${learned.graph_strengthened.edges_after} links)`}
@@ -210,7 +210,7 @@ export default function IncidentDetail() {
               <ul className="mt-2 divide-y divide-rule border-y border-rule">
                 {related.map((r) => (
                   <li key={r.incident_id}>
-                    <Link to={`/incidents/${r.incident_id}`} className="flex items-start gap-3 py-2.5 hover:text-teal">
+                    <Link to={`/incidents/${r.incident_id}`} className="flex items-start gap-3 py-2.5 hover:text-accent">
                       <span className="mt-2 h-2 w-2 shrink-0 rounded-full" style={{ background: sevColor(r.severity) }} aria-hidden />
                       <span>
                         <span className="block text-[15px] font-bold">{humanize(r.alert_name)}</span>

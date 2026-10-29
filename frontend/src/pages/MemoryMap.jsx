@@ -68,7 +68,7 @@ export default function MemoryMap() {
 
   return (
     <div className="mx-auto max-w-page px-4 pb-16 pt-10 sm:px-6">
-      <h1 className="text-[2.25rem] font-bold leading-tight">Memory map</h1>
+      <h1 className="text-[2.25rem] font-semibold tracking-tight leading-tight">Memory map</h1>
       <p className="mt-2 max-w-prose text-muted">
         Each island is a service and each dot an incident on it. A line joins two incidents
         that share something MemOps learned, like an error, a fix or the engineer who handled
@@ -99,7 +99,7 @@ export default function MemoryMap() {
       </div>
 
       {reinforced.length > 0 && (
-        <p className="mt-3 text-sm text-teal-dark">The ringed incident is the one MemOps just re-learned.</p>
+        <p className="mt-3 text-sm text-accent-strong">The ringed incident is the one MemOps just re-learned.</p>
       )}
 
       <div className="relative mt-4 min-h-[20rem] overflow-hidden border border-rule bg-sheet sm:h-[70vh] sm:min-h-[28rem]">
@@ -121,7 +121,7 @@ export default function MemoryMap() {
         )}
         {latest && (
           <div className="pointer-events-none absolute left-3 top-3 z-10 bg-sheet/90 px-2 py-1" aria-live="polite">
-            <div className="font-lcd text-[2rem] leading-none text-ink">
+            <div className="font-mono text-[2rem] leading-none text-ink">
               {latestInfo ? fmtDate(latestInfo.timestamp) : latest.incident_id}
             </div>
             <div className="mt-1 text-sm text-muted">

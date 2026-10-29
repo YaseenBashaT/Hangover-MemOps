@@ -22,7 +22,7 @@ function Patterns() {
       ) : (
         <ul className="mt-2 space-y-2">
           {items.map((t, i) => (
-            <li key={i} className="border-l-2 border-teal/50 pl-4 text-[15px] leading-relaxed">
+            <li key={i} className="border-l-2 border-accent/50 pl-4 text-[15px] leading-relaxed">
               <BoldText text={t} />
             </li>
           ))}
@@ -63,20 +63,20 @@ export default function Incidents() {
   }, [incidents, query, service, severity]);
 
   const selectCls =
-    "rounded-md border border-rule bg-white px-3 py-2 text-[15px] text-ink focus:border-teal";
+    "rounded-md border border-rule bg-sheet px-3 py-2 text-[15px] text-ink focus:border-accent";
 
   return (
     <div className="mx-auto max-w-page px-4 pb-20 pt-10 sm:px-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-[2.25rem] font-bold leading-tight">Incidents</h1>
+          <h1 className="text-[2.25rem] font-semibold tracking-tight leading-tight">Incidents</h1>
           <p className="mt-1 text-muted">
             {data ? `${incidents.length} incidents in memory.` : "Everything MemOps remembers."}
           </p>
         </div>
         <Link
           to="/incidents/new"
-          className="rounded-md bg-teal px-4 py-2 text-[15px] font-bold text-white hover:bg-teal-dark"
+          className="rounded-md bg-accent px-4 py-2 text-[15px] font-bold text-accent-on hover:bg-accent-strong"
         >
           Add incident
         </Link>
@@ -93,7 +93,7 @@ export default function Incidents() {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search by ID, service or alert"
-              className="w-full rounded-md border border-rule bg-white px-3 py-2 text-[15px] outline-none focus:border-teal"
+              className="w-full rounded-md border border-rule bg-sheet px-3 py-2 text-[15px] outline-none focus:border-accent"
             />
           </label>
           <label>
@@ -133,14 +133,14 @@ export default function Incidents() {
                 <li key={i.incident_id}>
                   <Link
                     to={`/incidents/${i.incident_id}`}
-                    className="grid grid-cols-1 gap-x-4 gap-y-0.5 px-4 py-3.5 hover:bg-white md:grid-cols-[7.5rem_1fr_11rem_6.5rem_5.5rem] md:items-baseline"
+                    className="grid grid-cols-1 gap-x-4 gap-y-0.5 px-4 py-3.5 hover:bg-raise md:grid-cols-[7.5rem_1fr_11rem_6.5rem_5.5rem] md:items-baseline"
                   >
-                    <span className="order-3 text-sm text-muted tabular-nums md:order-none">{fmtDate(i.timestamp)}</span>
+                    <span className="order-3 font-mono text-[13px] text-muted md:order-none">{fmtDate(i.timestamp)}</span>
                     <span className="min-w-0">
                       <span className="block font-bold">{humanize(i.alert_name)}</span>
-                      <span className="block text-sm text-muted">{i.incident_id}</span>
+                      <span className="block font-mono text-[13px] text-muted">{i.incident_id}</span>
                     </span>
-                    <span className="text-[15px]">{i.service_affected}</span>
+                    <span className="font-mono text-[13px]">{i.service_affected}</span>
                     <span><Severity severity={i.severity} /></span>
                     <span className="hidden md:block"><Status status={i.status} /></span>
                   </Link>

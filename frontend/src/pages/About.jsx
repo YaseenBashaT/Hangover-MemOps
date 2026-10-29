@@ -41,7 +41,7 @@ export default function About() {
   return (
     <div className="mx-auto max-w-page px-4 pb-20 pt-10 sm:px-6 sm:pt-14">
       <div className="max-w-[46rem]">
-        <h1 className="text-[2.25rem] font-bold leading-[1.1] sm:text-[2.75rem]">What MemOps is</h1>
+        <h1 className="text-[2.25rem] font-semibold tracking-tight leading-[1.1] sm:text-[2.75rem]">What MemOps is</h1>
         <p className="mt-4 text-[1.2rem] leading-relaxed">
           MemOps remembers how your team fixed production incidents, so whoever gets paged next
           starts from what worked last time instead of from nothing.
@@ -60,7 +60,7 @@ export default function About() {
           <ul className="mt-4 max-w-prose space-y-2.5">
             {AUDIENCE.map((a) => (
               <li key={a} className="flex gap-3 leading-relaxed">
-                <span className="mt-[0.6rem] h-1.5 w-1.5 shrink-0 rounded-full bg-teal" aria-hidden />
+                <span className="mt-[0.6rem] h-1.5 w-1.5 shrink-0 rounded-full bg-accent" aria-hidden />
                 {a}
               </li>
             ))}
@@ -71,7 +71,7 @@ export default function About() {
           <ol className="mt-5 space-y-6">
             {STEPS.map(([title, body], i) => (
               <li key={title} className="grid grid-cols-[2.5rem_1fr] gap-3">
-                <span className="font-lcd text-[2.25rem] leading-none text-teal">{i + 1}</span>
+                <span className="pt-0.5 font-mono text-sm font-semibold text-accent">{String(i + 1).padStart(2, "0")}</span>
                 <span>
                   <span className="block font-bold">{title}</span>
                   <span className="mt-1 block max-w-prose leading-relaxed text-muted">{body}</span>
@@ -86,8 +86,8 @@ export default function About() {
         <ul className="mt-5 grid gap-px border border-rule bg-rule sm:grid-cols-2">
           {FEATURES.map(([to, name, body]) => (
             <li key={to} className="bg-sheet">
-              <Link to={to} className="group block h-full px-5 py-5 hover:bg-white">
-                <span className="font-bold text-ink group-hover:text-teal">
+              <Link to={to} className="group block h-full px-5 py-5 hover:bg-raise">
+                <span className="font-bold text-ink group-hover:text-accent">
                   {name} <span aria-hidden>→</span>
                 </span>
                 <span className="mt-1.5 block text-[15px] leading-relaxed text-muted">{body}</span>
@@ -113,7 +113,7 @@ export default function About() {
             React with Vite and Tailwind, and the memory map is drawn with D3.{" "}
             <a
               href="https://github.com/YaseenBashaT/Hangover-MemOps"
-              className="text-teal underline-offset-4 hover:underline"
+              className="text-accent underline-offset-4 hover:underline"
             >
               Source on GitHub
             </a>
@@ -123,7 +123,7 @@ export default function About() {
         <div className="mt-14">
           <Link
             to="/"
-            className="inline-flex items-center rounded-md bg-teal px-4 py-2 text-[15px] font-bold text-white hover:bg-teal-dark"
+            className="inline-flex items-center rounded-md bg-accent px-4 py-2 text-[15px] font-bold text-accent-on hover:bg-accent-strong"
           >
             Try it with an alert
           </Link>
