@@ -38,6 +38,10 @@
   --island-4: 241 233 228;
   --island-5: 228 238 243;
   --island-6: 236 234 224;
+  /* the retro terminal's case: beige like an old office monitor */
+  --bezel: 222 216 200;
+  --bezel-edge: 190 182 162;
+  --bezel-text: 120 112 92;
 }
 
 :root.dark {
@@ -72,6 +76,9 @@
   --island-4: 44 33 30;
   --island-5: 21 38 52;
   --island-6: 38 38 28;
+  --bezel: 36 40 46;
+  --bezel-edge: 22 25 30;
+  --bezel-text: 110 118 130;
 }
 
 html,
@@ -113,6 +120,84 @@ footer {
 }
 .term-cursor {
   animation: blink 1s steps(1) infinite;
+}
+
+/* ---- the retro terminal on Ask: a green phosphor CRT ---- */
+.crt-case {
+  background: linear-gradient(180deg, rgb(var(--bezel)) 0%, rgb(var(--bezel-edge)) 100%);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.25),
+    inset 0 -2px 0 rgb(0 0 0 / 0.15),
+    0 18px 40px -18px rgb(2 6 23 / 0.55);
+}
+.crt-screen {
+  position: relative;
+  background: radial-gradient(ellipse at 50% 45%, #0d2614 0%, #06120a 65%, #020604 100%);
+  box-shadow:
+    inset 0 0 0 2px #000,
+    inset 0 0 40px rgb(0 0 0 / 0.85);
+  animation: crtFlicker 6s infinite;
+}
+/* scanlines */
+.crt-screen::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  background: repeating-linear-gradient(to bottom, rgb(0 0 0 / 0.3) 0 1px, transparent 1px 3px);
+  z-index: 2;
+}
+/* the glass: darker corners and a soft reflection */
+.crt-screen::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  background:
+    radial-gradient(ellipse at 30% 10%, rgb(255 255 255 / 0.06), transparent 45%),
+    radial-gradient(ellipse at center, transparent 58%, rgb(0 0 0 / 0.6) 100%);
+  z-index: 3;
+}
+.crt-text {
+  color: #5cff86;
+  text-shadow: 0 0 3px rgb(92 255 134 / 0.75), 0 0 14px rgb(92 255 134 / 0.3);
+}
+.crt-dim {
+  color: #2f9e52;
+  text-shadow: 0 0 3px rgb(47 158 82 / 0.5);
+}
+.crt-text::placeholder {
+  color: #237a3e;
+  text-shadow: none;
+}
+.crt-text::selection {
+  background: #5cff86;
+  color: #03140a;
+}
+.crt-led {
+  background: #5cff86;
+  box-shadow: 0 0 6px #5cff86, 0 0 14px rgb(92 255 134 / 0.6);
+}
+.crt-led-busy {
+  animation: blink 0.5s steps(1) infinite;
+}
+@keyframes crtFlicker {
+  0%, 100% { opacity: 1; }
+  47% { opacity: 1; }
+  48% { opacity: 0.94; }
+  49% { opacity: 1; }
+  92% { opacity: 0.97; }
+}
+/* the screen switching on */
+@keyframes crtOn {
+  0% { transform: scaleY(0.02); filter: brightness(3); }
+  60% { transform: scaleY(1); filter: brightness(1.6); }
+  100% { transform: scaleY(1); filter: brightness(1); }
+}
+.crt-on {
+  animation: crtOn 0.45s ease-out;
 }
 
 /* the live dot next to the logo */
@@ -160,6 +245,9 @@ footer {
 
 @media (prefers-reduced-motion: reduce) {
   .term-cursor,
+  .crt-screen,
+  .crt-on,
+  .crt-led-busy,
   .live-dot,
   .graph-halo,
   .graph-flow,

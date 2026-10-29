@@ -29,6 +29,7 @@ export default {
       fontFamily: {
         sans: ['"IBM Plex Sans"', "system-ui", "sans-serif"],
         mono: ['"JetBrains Mono"', "ui-monospace", "monospace"],
+        crt: ['"VT323"', "ui-monospace", "monospace"], // the retro terminal on Ask
       },
       maxWidth: { page: "70rem", prose: "40rem" },
     },

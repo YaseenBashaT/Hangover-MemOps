@@ -52,51 +52,68 @@ function verdict(result) {
   return "This has happened before.";
 }
 
+// The alert box is an old green-phosphor terminal: a beige (or, in the dark
+// theme, graphite) case, scanlines, glowing text and a boot-log while it searches.
 function Terminal({ text, setText, loading, stage, onAsk }) {
   return (
-    <div className="overflow-hidden rounded-xl border border-term-line bg-term-bg shadow-[0_12px_32px_-16px_rgb(2_6_23/0.6)]">
-      <div className="flex items-center justify-between border-b border-term-line px-4 py-2 font-mono text-xs text-term-dim">
-        <span>on-call / new alert</span>
-        <span className={loading ? "text-term-text" : ""}>{loading ? "searching memory" : "ready"}</span>
-      </div>
-      <div className="px-4 py-4 font-mono sm:px-5">
-        {loading ? (
-          <div className="min-h-[7rem] text-[15px] leading-relaxed" aria-live="polite">
-            <div className="text-term-dim">$ {text}</div>
-            {STAGES.slice(0, stage + 1).map((s, i) => (
-              <div key={s} className="mt-1 text-term-text">
-                <span className="text-term-dim">{i < stage ? "done " : "...  "}</span>
-                {s}
-                {i === stage && <span className="term-cursor">_</span>}
-              </div>
-            ))}
+    <div className="crt-case rounded-[22px] p-2.5 sm:p-3.5">
+      <div className="crt-screen crt-on overflow-hidden rounded-[14px] px-4 pb-4 pt-3 font-crt text-[21px] leading-[1.2] sm:px-6 sm:text-[23px]">
+        <div className="relative z-[1]">
+          <div className="crt-dim flex justify-between gap-4 uppercase">
+            <span>MemOps recall v1.0</span>
+            <span>{loading ? "Busy" : "Ready."}</span>
           </div>
-        ) : (
-          <label className="flex gap-3">
-            <span className="select-none pt-px text-[15px] text-term-dim" aria-hidden>$</span>
-            <span className="sr-only">Alert text</span>
-            <textarea
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  onAsk();
-                }
-              }}
-              rows={4}
-              placeholder="paste the alert that just fired"
-              className="block min-h-[7rem] w-full resize-none bg-transparent text-[15px] leading-relaxed text-term-text caret-term-text outline-none placeholder:text-term-dim"
-            />
-          </label>
-        )}
+          <div className="crt-dim mb-2 overflow-hidden whitespace-nowrap" aria-hidden>{"=".repeat(64)}</div>
+          {loading ? (
+            <div className="min-h-[6.5rem]" aria-live="polite">
+              <div className="crt-dim break-words">&gt; {text}</div>
+              {STAGES.slice(0, stage + 1).map((s, i) => (
+                <div key={s} className="crt-text uppercase">
+                  {i < stage ? "[ OK ] " : "[ .. ] "}
+                  {s}
+                  {i === stage && <span className="term-cursor">█</span>}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <label className="flex gap-3">
+              <span className="crt-text select-none" aria-hidden>
+                &gt;
+              </span>
+              <span className="sr-only">Alert text</span>
+              <textarea
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    onAsk();
+                  }
+                }}
+                rows={4}
+                spellCheck={false}
+                placeholder="paste the alert that just fired"
+                style={{ caretShape: "block" }}
+                className="crt-text block min-h-[6.5rem] w-full resize-none bg-transparent caret-[#5cff86] outline-none"
+              />
+            </label>
+          )}
+        </div>
       </div>
-      <div className="flex items-center justify-between gap-3 border-t border-term-line px-4 py-2.5">
-        <span className="font-mono text-xs text-term-dim">Enter to ask<span className="hidden sm:inline">, Shift+Enter for a new line</span></span>
-        <Button onClick={onAsk} disabled={loading || !text.trim()} className="whitespace-nowrap disabled:bg-term-line disabled:text-term-dim">
-          {loading && <ButtonSpinner />}
-          {loading ? "Searching" : "Ask memory"}
-        </Button>
+
+      <div className="flex items-center justify-between gap-3 px-2 pb-0.5 pt-3">
+        <span className="flex items-center gap-2.5 font-mono text-[11px] font-semibold uppercase tracking-[0.16em] text-[rgb(var(--bezel-text))]">
+          <span className={`crt-led h-2 w-2 rounded-full ${loading ? "crt-led-busy" : ""}`} aria-hidden />
+          MemOps·1
+          <span className="hidden font-normal normal-case tracking-normal sm:inline">Enter to ask, Shift+Enter for a new line</span>
+        </span>
+        <button
+          onClick={onAsk}
+          disabled={loading || !text.trim()}
+          className="crt-text inline-flex items-center gap-2 whitespace-nowrap rounded-md border border-black/40 bg-[#07140b] px-4 py-1.5 font-crt text-[20px] uppercase shadow-[0_3px_0_rgb(0_0_0/0.45)] transition-transform active:translate-y-[2px] active:shadow-[0_1px_0_rgb(0_0_0/0.45)] disabled:cursor-not-allowed disabled:opacity-45"
+        >
+          {loading ? "Searching…" : "Ask memory ▸"}
+        </button>
       </div>
     </div>
   );
