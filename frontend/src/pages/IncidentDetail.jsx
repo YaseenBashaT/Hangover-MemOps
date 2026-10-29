@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useLocation, Link } from "react-router-dom";
 import { api, fmtDate, humanize, sevColor } from "../api.js";
-import { Button, ButtonSpinner, ErrorNote, Severity, Spinner, Status } from "../components/ui.jsx";
+import { Button, ButtonSpinner, ErrorNote, Icon, Severity, Spinner, Status } from "../components/ui.jsx";
 
 // "[03:16] sarah.chen: on it" -> { time, who, text }
 function parseSlackLine(line) {
@@ -15,15 +15,6 @@ function Section({ title, children }) {
       <h2 className="text-lg font-bold">{title}</h2>
       <div className="mt-3">{children}</div>
     </section>
-  );
-}
-
-function Fact({ label, children }) {
-  return (
-    <div className="flex justify-between gap-4 py-2">
-      <dt className="text-muted">{label}</dt>
-      <dd className="text-right">{children}</dd>
-    </div>
   );
 }
 
@@ -75,8 +66,8 @@ export default function IncidentDetail() {
   }
 
   const back = (
-    <Link to="/incidents" className="text-[15px] text-teal underline-offset-4 hover:underline">
-      All incidents
+    <Link to="/incidents" className="text-[14px] text-muted transition-colors hover:text-accent">
+      ← All incidents
     </Link>
   );
 
@@ -102,48 +93,63 @@ export default function IncidentDetail() {
   const open = inc.status !== "resolved";
 
   return (
-    <div className="mx-auto max-w-page px-4 pb-20 pt-8 sm:px-6">
+    <div className="mx-auto max-w-page px-4 pb-20 pt-8 sm:px-6 lg:px-10">
       {back}
       {location.state?.added && (
-        <p className="mt-4 max-w-prose bg-teal-wash px-4 py-3 text-teal-dark" role="status">
+        <p className="mt-4 max-w-prose bg-accent-wash px-4 py-3 text-accent-strong" role="status">
           Added to memory. Alerts that look like this one will now find it.
         </p>
       )}
 
-      <header className="mt-5 border-b border-rule pb-6">
-        <h1 className="text-[2.25rem] font-bold leading-tight">{humanize(inc.alert_name)}</h1>
-        <div className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-1 text-[15px] text-muted">
-          <span>{inc.incident_id}</span>
-          <span>{inc.service_affected}</span>
-          <span>{fmtDate(inc.timestamp)}</span>
-          <Severity severity={inc.severity} />
-          <Status status={inc.status} />
+      <header className="mt-5">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[13px] text-muted">
+          <span className="text-ink">{inc.incident_id}</span>
+          <span aria-hidden>/</span>
+          <Link to={`/incidents?service=${encodeURIComponent(inc.service_affected)}`} className="hover:text-accent">
+            {inc.service_affected}
+          </Link>
         </div>
+        <h1 className="mt-2 text-[2.25rem] font-semibold leading-tight tracking-tight">{humanize(inc.alert_name)}</h1>
+        <dl className="mt-6 grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-rule bg-rule sm:grid-cols-4">
+          {[
+            ["alert", "Severity", <Severity key="s" severity={inc.severity} />],
+            ["clock", "Time to fix", inc.resolution_time_minutes != null ? `${inc.resolution_time_minutes} min` : "Not recorded"],
+            ["user", "Engineer", inc.engineer_name || "Unknown"],
+            ["calendar", "Happened", fmtDate(inc.timestamp)],
+          ].map(([icon, label, value]) => (
+            <div key={label} className="bg-sheet px-4 py-3">
+              <dt className="flex items-center gap-1.5 text-[13px] text-muted">
+                <Icon name={icon} size={14} />
+                {label}
+              </dt>
+              <dd className="mt-1 font-mono text-[15px] font-semibold">{value}</dd>
+            </div>
+          ))}
+        </dl>
       </header>
 
       <div className="mt-8 grid gap-12 lg:grid-cols-[1fr_18rem]">
         <article className="min-w-0 max-w-[44rem]">
           <Section title="How it was fixed">
-            <p className="border-l-4 border-teal pl-5 text-[1.2rem] leading-relaxed">{inc.fix_applied}</p>
+            <p className="rounded-xl border border-accent/30 bg-accent-wash/40 px-5 py-4 text-[1.125rem] leading-relaxed">{inc.fix_applied}</p>
           </Section>
 
           <Section title="What broke">
-            <pre className="overflow-x-auto whitespace-pre-wrap break-words bg-ink px-4 py-3 font-mono text-[13px] leading-relaxed text-[#F2B8B5]">
+            <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded-lg border border-term-line bg-term-bg px-4 py-3 font-mono text-[13px] leading-relaxed text-[#FCA5A5]">
               {inc.error_log}
             </pre>
           </Section>
 
           {slack.length > 0 && (
             <Section title="How it unfolded">
-              <ol className="relative border-l border-rule">
+              <ol className="overflow-hidden rounded-xl border border-rule bg-sheet">
                 {slack.map((m, i) => (
-                  <li key={i} className="relative pb-4 pl-6 last:pb-0">
-                    <span className="absolute -left-[5px] top-2 h-2.5 w-2.5 rounded-full border-2 border-paper bg-muted" aria-hidden />
-                    <div className="text-sm text-muted">
-                      <span className="tabular-nums">{m.time}</span>
-                      {m.who && <span className="ml-2 font-bold text-ink">{m.who}</span>}
-                    </div>
-                    <p className="text-[15px]">{m.text}</p>
+                  <li key={i} className="grid grid-cols-[3.25rem_1fr] gap-3 border-b border-rule px-4 py-2.5 last:border-b-0">
+                    <span className="pt-0.5 font-mono text-[12px] text-faint">{m.time}</span>
+                    <span className="min-w-0 text-[14.5px]">
+                      {m.who && <span className="mr-2 font-semibold">{m.who}</span>}
+                      <span className="text-muted">{m.text}</span>
+                    </span>
                   </li>
                 ))}
               </ol>
@@ -161,7 +167,7 @@ export default function IncidentDetail() {
               {(inc.git_commits || []).length > 0 && (
                 <ul className="mt-3 space-y-1.5">
                   {inc.git_commits.map((c, i) => (
-                    <li key={i} className="font-mono text-[13px] text-[#2F5F3A]">{c}</li>
+                    <li key={i} className="font-mono text-[13px] text-accent">{c}</li>
                   ))}
                 </ul>
               )}
@@ -170,17 +176,14 @@ export default function IncidentDetail() {
         </article>
 
         <aside className="space-y-10">
-          <dl className="divide-y divide-rule border-y border-rule text-[15px]">
-            <Fact label="Engineer">{inc.engineer_name || "Unknown"}</Fact>
-            <Fact label="Time to fix">
-              {inc.resolution_time_minutes != null ? `${inc.resolution_time_minutes} min` : "Not recorded"}
-            </Fact>
-            <Fact label="Outcome"><span className="capitalize">{inc.outcome}</span></Fact>
-          </dl>
+          <div className="flex items-center justify-between rounded-xl border border-rule bg-sheet px-4 py-3 text-[14px]">
+            <span className="text-muted">Status</span>
+            <Status status={inc.status} />
+          </div>
 
           <div>
             {learned ? (
-              <p className="bg-teal-wash px-4 py-3 text-sm text-teal-dark" role="status">
+              <p className="bg-accent-wash px-4 py-3 text-sm text-accent-strong" role="status">
                 Saved. MemOps re-learned this incident
                 {learned.graph_strengthened?.edges_after != null &&
                   ` (${learned.graph_strengthened.edges_before} to ${learned.graph_strengthened.edges_after} links)`}
@@ -210,7 +213,7 @@ export default function IncidentDetail() {
               <ul className="mt-2 divide-y divide-rule border-y border-rule">
                 {related.map((r) => (
                   <li key={r.incident_id}>
-                    <Link to={`/incidents/${r.incident_id}`} className="flex items-start gap-3 py-2.5 hover:text-teal">
+                    <Link to={`/incidents/${r.incident_id}`} className="flex items-start gap-3 py-2.5 hover:text-accent">
                       <span className="mt-2 h-2 w-2 shrink-0 rounded-full" style={{ background: sevColor(r.severity) }} aria-hidden />
                       <span>
                         <span className="block text-[15px] font-bold">{humanize(r.alert_name)}</span>

@@ -2,8 +2,83 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Colors are RGB triplets so Tailwind's opacity modifiers (bg-accent/10) work. */
 :root {
   color-scheme: light;
+  --paper: 248 250 252;
+  --sheet: 255 255 255;
+  --raise: 241 245 249;
+  --ink: 15 23 42;
+  --muted: 71 85 105;
+  --faint: 100 116 139;
+  --rule: 226 232 240;
+  --accent: 21 128 61;
+  --accent-strong: 22 101 52;
+  --accent-wash: 220 252 231;
+  --accent-on: 255 255 255;
+  --term-bg: 15 23 42;
+  --term-text: 134 239 172;
+  --term-dim: 100 116 139;
+  --term-line: 30 41 59;
+  --sev-critical: 201 60 60;
+  --sev-high: 194 97 28;
+  --sev-medium: 176 116 30;
+  --sev-low: 47 133 90;
+  --sev-none: 142 148 157;
+  /* memory map */
+  --map-link: 175 192 187;
+  --map-link-hot: 21 128 61;
+  --map-rim: 255 255 255;
+  --map-shore: 210 216 210;
+  --map-shore-lit: 159 185 179;
+  --island-0: 225 238 235;
+  --island-1: 229 232 244;
+  --island-2: 238 230 242;
+  --island-3: 232 236 239;
+  --island-4: 241 233 228;
+  --island-5: 228 238 243;
+  --island-6: 236 234 224;
+  /* the retro terminal's case: beige like an old office monitor */
+  --bezel: 222 216 200;
+  --bezel-edge: 190 182 162;
+  --bezel-text: 120 112 92;
+}
+
+:root.dark {
+  color-scheme: dark;
+  --paper: 11 17 32;
+  --sheet: 17 24 39;
+  --raise: 30 41 59;
+  --ink: 241 245 249;
+  --muted: 148 163 184;
+  --faint: 125 139 160;
+  --rule: 39 50 70;
+  --accent: 34 197 94;
+  --accent-strong: 74 222 128;
+  --accent-wash: 20 46 32;
+  --accent-on: 5 20 11;
+  --term-bg: 2 6 23;
+  --term-line: 30 41 59;
+  --sev-critical: 248 113 113;
+  --sev-high: 251 146 60;
+  --sev-medium: 251 191 36;
+  --sev-low: 74 222 128;
+  --sev-none: 148 163 184;
+  --map-link: 71 85 105;
+  --map-link-hot: 74 222 128;
+  --map-rim: 17 24 39;
+  --map-shore: 39 50 70;
+  --map-shore-lit: 71 104 92;
+  --island-0: 20 41 40;
+  --island-1: 26 32 58;
+  --island-2: 38 28 52;
+  --island-3: 30 38 50;
+  --island-4: 44 33 30;
+  --island-5: 21 38 52;
+  --island-6: 38 38 28;
+  --bezel: 36 40 46;
+  --bezel-edge: 22 25 30;
+  --bezel-text: 110 118 130;
 }
 
 html,
@@ -14,30 +89,124 @@ body,
 
 body {
   margin: 0;
-  background: #f3f4f1;
-  color: #14171f;
-  font-family: "Public Sans", system-ui, sans-serif;
+  background: rgb(var(--paper));
+  color: rgb(var(--ink));
+  font-family: "IBM Plex Sans", system-ui, sans-serif;
   font-size: 16px;
   line-height: 1.55;
   -webkit-font-smoothing: antialiased;
 }
 
+/* theme switch: fade colors instead of flashing */
+body,
+header,
+footer {
+  transition: background-color 200ms ease, color 200ms ease;
+}
+
 ::placeholder {
-  color: #a3a8af;
+  color: rgb(var(--faint));
   opacity: 1;
 }
 
 :focus-visible {
-  outline: 2px solid #0f6e6e;
+  outline: 2px solid rgb(var(--accent));
   outline-offset: 2px;
 }
 
-/* the pager's text cursor */
+/* the terminal's text cursor */
 @keyframes blink {
   50% { opacity: 0; }
 }
-.lcd-cursor {
+.term-cursor {
   animation: blink 1s steps(1) infinite;
+}
+
+/* ---- the retro terminal on Ask: a green phosphor CRT ---- */
+.crt-case {
+  background: linear-gradient(180deg, rgb(var(--bezel)) 0%, rgb(var(--bezel-edge)) 100%);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.25),
+    inset 0 -2px 0 rgb(0 0 0 / 0.15),
+    0 18px 40px -18px rgb(2 6 23 / 0.55);
+}
+.crt-screen {
+  position: relative;
+  background: radial-gradient(ellipse at 50% 45%, #0d2614 0%, #06120a 65%, #020604 100%);
+  box-shadow:
+    inset 0 0 0 2px #000,
+    inset 0 0 40px rgb(0 0 0 / 0.85);
+  animation: crtFlicker 6s infinite;
+}
+/* scanlines */
+.crt-screen::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  background: repeating-linear-gradient(to bottom, rgb(0 0 0 / 0.3) 0 1px, transparent 1px 3px);
+  z-index: 2;
+}
+/* the glass: darker corners and a soft reflection */
+.crt-screen::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  background:
+    radial-gradient(ellipse at 30% 10%, rgb(255 255 255 / 0.06), transparent 45%),
+    radial-gradient(ellipse at center, transparent 58%, rgb(0 0 0 / 0.6) 100%);
+  z-index: 3;
+}
+.crt-text {
+  color: #5cff86;
+  text-shadow: 0 0 3px rgb(92 255 134 / 0.75), 0 0 14px rgb(92 255 134 / 0.3);
+}
+.crt-dim {
+  color: #2f9e52;
+  text-shadow: 0 0 3px rgb(47 158 82 / 0.5);
+}
+.crt-text::placeholder {
+  color: #237a3e;
+  text-shadow: none;
+}
+.crt-text::selection {
+  background: #5cff86;
+  color: #03140a;
+}
+.crt-led {
+  background: #5cff86;
+  box-shadow: 0 0 6px #5cff86, 0 0 14px rgb(92 255 134 / 0.6);
+}
+.crt-led-busy {
+  animation: blink 0.5s steps(1) infinite;
+}
+@keyframes crtFlicker {
+  0%, 100% { opacity: 1; }
+  47% { opacity: 1; }
+  48% { opacity: 0.94; }
+  49% { opacity: 1; }
+  92% { opacity: 0.97; }
+}
+/* the screen switching on */
+@keyframes crtOn {
+  0% { transform: scaleY(0.02); filter: brightness(3); }
+  60% { transform: scaleY(1); filter: brightness(1.6); }
+  100% { transform: scaleY(1); filter: brightness(1); }
+}
+.crt-on {
+  animation: crtOn 0.45s ease-out;
+}
+
+/* the live dot next to the logo */
+@keyframes livePulse {
+  0% { box-shadow: 0 0 0 0 rgb(var(--accent) / 0.5); }
+  70%, 100% { box-shadow: 0 0 0 6px rgb(var(--accent) / 0); }
+}
+.live-dot {
+  animation: livePulse 2.4s ease-out infinite;
 }
 
 /* reinforced incidents on the memory map */
@@ -75,11 +244,20 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .lcd-cursor,
+  .term-cursor,
+  .crt-screen,
+  .crt-on,
+  .crt-led-busy,
+  .live-dot,
   .graph-halo,
   .graph-flow,
   .graph-pop,
   .animate-spin {
     animation: none;
+  }
+  body,
+  header,
+  footer {
+    transition: none;
   }
 }

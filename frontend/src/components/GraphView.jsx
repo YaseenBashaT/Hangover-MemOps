@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as d3 from "d3";
 import { fmtDate, humanize, sevColor } from "../api.js";
+import { buildModel } from "./mapModel.js";
 
 const NODE_R = { critical: 12, high: 11, medium: 10, low: 9 };
-const LINK = "#AFC0BB";
-const LINK_HOT = "#0F6E6E";
+// colors are theme variables from index.css, set through style so they follow the theme
+const c = (name) => `rgb(var(--${name}))`;
+const LINK = c("map-link");
+const LINK_HOT = c("map-link-hot");
 // soft island colors, kept away from the severity reds/ambers/greens
-const ISLANDS = ["#E1EEEB", "#E5E8F4", "#EEE6F2", "#E8ECEF", "#F1E9E4", "#E4EEF3", "#ECEAE0"];
+const ISLANDS = [0, 1, 2, 3, 4, 5, 6].map((i) => c(`island-${i}`));
 const NARROW = 640;
 const PAD = 24; // how far an island reaches past its dots
 
@@ -17,33 +20,10 @@ const PAD = 24; // how far an island reaches past its dots
  * an engineer), and those lines are weak springs: drag a dot and the islands
  * stretch, incidents it shares details with get tugged along, and the dot
  * settles partway between where it was and where it was dropped.
+ *
+ * Answers: which services keep having incidents, and which incidents belong
+ * together? Good as a first look at the whole memory.
  */
-function buildModel(data) {
-  const byId = new Map(data.nodes.map((n) => [n.id, n]));
-  const incidents = data.nodes.filter((n) => n.node_kind === "incident");
-
-  // incident -> the Entity nodes it links to
-  const details = new Map(incidents.map((i) => [i.id, new Set()]));
-  for (const l of data.links) {
-    const s = l.source.id ?? l.source;
-    const t = l.target.id ?? l.target;
-    if (details.has(s) && byId.get(t)?.type === "Entity") details.get(s).add(t);
-    if (details.has(t) && byId.get(s)?.type === "Entity") details.get(t).add(s);
-  }
-
-  const links = [];
-  for (let a = 0; a < incidents.length; a++)
-    for (let b = a + 1; b < incidents.length; b++) {
-      const shared = [...details.get(incidents[a].id)].filter((x) => details.get(incidents[b].id).has(x));
-      if (shared.length)
-        links.push({ a: incidents[a].id, b: incidents[b].id, shared: shared.map((x) => byId.get(x).label) });
-    }
-
-  const services = [...d3.group(incidents, (i) => i.service || "unknown")]
-    .map(([name, items]) => ({ name, items }))
-    .sort((a, b) => b.items.length - a.items.length);
-  return { incidents, links, services };
-}
 
 // Where each island sits. Wide screens pack them into the box; phones stack
 // them down the page and the map grows taller instead.
@@ -251,7 +231,7 @@ export default function GraphView({ data, meta, onIncidentClick, highlightIds = 
         key={`${l.a}-${l.b}${hot ? "-hot" : ""}`}
         d={`M${a.x},${a.y} Q${mx},${my} ${b.x},${b.y}`}
         fill="none"
-        stroke={hot ? LINK_HOT : LINK}
+        style={{ stroke: hot ? LINK_HOT : LINK }}
         strokeWidth={hot ? 2 + l.shared.length * 0.5 : 1 + l.shared.length * 0.35}
         strokeLinecap="round"
         strokeDasharray={hot ? "2 9" : between ? "3 5" : undefined}
@@ -297,8 +277,7 @@ export default function GraphView({ data, meta, onIncidentClick, highlightIds = 
               <path
                 key={a.name}
                 d={s.d}
-                fill={a.color}
-                stroke={lit ? "#9FB9B3" : "#D2D8D2"}
+                style={{ fill: a.color, stroke: c(lit ? "map-shore-lit" : "map-shore") }}
                 strokeWidth={lit ? 1.5 : 1}
                 onClick={() => setSelected(null)}
               />
@@ -312,14 +291,13 @@ export default function GraphView({ data, meta, onIncidentClick, highlightIds = 
                 textAnchor="middle"
                 fontSize={13}
                 fontWeight={700}
-                fill="#14171F"
-                stroke="#FBFBF9"
+                style={{ fill: c("ink"), stroke: c("paper") }}
                 strokeWidth={4}
                 paintOrder="stroke"
                 className="pointer-events-none"
               >
                 {a.name}
-                <tspan fill="#8E949D" fontWeight={400}>
+                <tspan style={{ fill: c("faint") }} fontWeight={400}>
                   {"  "}
                   {members.length}
                 </tspan>
@@ -356,18 +334,17 @@ export default function GraphView({ data, meta, onIncidentClick, highlightIds = 
                 >
                   <g className="graph-pop">
                     {(hi.has(n.incident_id) || n.id === latestId) && (
-                      <circle r={n.r + 8} fill="none" stroke={LINK_HOT} strokeWidth={2.5} className="graph-halo" />
+                      <circle r={n.r + 8} fill="none" style={{ stroke: LINK_HOT }} strokeWidth={2.5} className="graph-halo" />
                     )}
-                    {selected === n.id && <circle r={n.r + 5} fill="none" stroke="#14171F" strokeWidth={2} />}
-                    <circle r={n.r + 5} fill={sevColor(n.severity)} opacity={0.18} />
-                    <circle r={n.r} fill={sevColor(n.severity)} stroke="#FFFFFF" strokeWidth={2} />
+                    {selected === n.id && <circle r={n.r + 5} fill="none" style={{ stroke: c("ink") }} strokeWidth={2} />}
+                    <circle r={n.r + 5} style={{ fill: sevColor(n.severity) }} opacity={0.18} />
+                    <circle r={n.r} style={{ fill: sevColor(n.severity), stroke: c("map-rim") }} strokeWidth={2} />
                     {label && (
                       <text
                         y={n.r + 17}
                         textAnchor="middle"
                         fontSize={11}
-                        fill="#14171F"
-                        stroke="#FFFFFF"
+                        style={{ fill: c("ink"), stroke: c("paper") }}
                         strokeWidth={3}
                         paintOrder="stroke"
                       >
@@ -386,8 +363,8 @@ export default function GraphView({ data, meta, onIncidentClick, highlightIds = 
         <div
           className={
             narrow
-              ? "fixed inset-x-3 bottom-3 z-20 border border-rule bg-white px-3 py-2.5 text-sm shadow-md"
-              : `absolute z-10 w-[19rem] border border-rule bg-white px-3 py-2.5 text-sm shadow-md ${sel ? "" : "pointer-events-none"}`
+              ? "fixed inset-x-3 bottom-3 z-20 border border-rule bg-sheet px-3 py-2.5 text-sm shadow-md"
+              : `absolute z-10 w-[19rem] border border-rule bg-sheet px-3 py-2.5 text-sm shadow-md ${sel ? "" : "pointer-events-none"}`
           }
           style={cardStyle}
         >
@@ -417,7 +394,7 @@ export default function GraphView({ data, meta, onIncidentClick, highlightIds = 
           {sel ? (
             <div className="mt-2 flex items-center justify-between">
               <button
-                className="font-bold text-teal underline-offset-4 hover:underline"
+                className="font-bold text-accent underline-offset-4 hover:underline"
                 onClick={() => onIncidentClick?.(card.incident_id)}
               >
                 Open incident →
