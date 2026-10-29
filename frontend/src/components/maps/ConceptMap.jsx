@@ -18,6 +18,8 @@ const RESIST = 0.7; // a dragged dot moves this much of the pointer's distance, 
  * incidents that mention it. Incidents that share nothing yet line up along
  * the bottom. Anything wired up can be dragged: it pulls its neighbours along
  * and, once let go, settles wherever the springs leave it.
+ *
+ * Answers: what exactly links these incidents, the same engineer, ticket or error?
  */
 export default function ConceptMap({ data, meta, onIncidentClick, highlightIds = [], shownIds = null, latestId = null }) {
   const [ref, box] = useBox();

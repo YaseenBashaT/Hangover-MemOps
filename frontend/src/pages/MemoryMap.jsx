@@ -19,24 +19,28 @@ const VIEWS = {
   islands: {
     name: "Islands",
     Map: GraphView,
+    answers: "Which services keep having incidents, and which incidents belong together?",
     about:
       "Each island is a service and each dot an incident on it. A line joins two incidents that share something MemOps learned, like an error, a fix or the engineer who handled it. Grab a dot and pull: the lines act like springs.",
   },
   timeline: {
     name: "Timeline",
     Map: TimelineMap,
+    answers: "Does a problem keep coming back, and how long between each time?",
     about:
       "One lane per service, each incident on the day it happened. An arch joins incidents that share something, so a problem that keeps coming back shows up as a chain along its lane.",
   },
   orbit: {
     name: "Orbit",
     Map: OrbitMap,
+    answers: "Which services are tied together by shared problems?",
     about:
       "Services share the ring, sized by how many incidents they had, with their incidents in date order going clockwise. Lines across the middle join incidents that share something.",
   },
   concepts: {
     name: "Concepts",
     Map: ConceptMap,
+    answers: "What exactly links these incidents: the same engineer, ticket or error?",
     about:
       "The details MemOps learned that more than one incident shares: engineers (@), tickets (#), errors (!) and services (~). Hover one to light up every incident that mentions it.",
   },
@@ -46,7 +50,7 @@ export default function MemoryMap() {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const view = VIEWS[params.get("view")] ? params.get("view") : "islands";
-  const { Map: ViewMap, about } = VIEWS[view];
+  const { Map: ViewMap, about, answers } = VIEWS[view];
   const location = useLocation();
   const [graph, setGraph] = useState(null);
   const [incidents, setIncidents] = useState([]);
@@ -117,7 +121,11 @@ export default function MemoryMap() {
           </button>
         ))}
       </div>
-      <p className="mt-3 max-w-prose text-muted">{about} Click a dot to see what it shares.</p>
+      <p className="mt-4 max-w-prose font-semibold">
+        <span className="mr-2 font-mono text-[11px] font-normal uppercase tracking-[0.14em] text-accent">Answers</span>
+        {answers}
+      </p>
+      <p className="mt-1 max-w-prose text-muted">{about} Click a dot to see what it shares.</p>
 
       <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-muted">
         {step === null ? (

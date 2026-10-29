@@ -14,6 +14,8 @@ const MIN_W = 760; // narrower screens scroll sideways inside the box
  * The memory as a timeline: one lane per service, incidents placed on the day
  * they happened, and an arc between incidents that share a detail. A problem
  * that keeps coming back shows up as a chain of arcs along one lane.
+ *
+ * Answers: does a problem keep coming back, and how long between each time?
  */
 export default function TimelineMap({ data, meta, onIncidentClick, highlightIds = [], shownIds = null, latestId = null }) {
   const [ref, box] = useBox();

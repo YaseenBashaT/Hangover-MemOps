@@ -14,6 +14,8 @@ const GAP = 0.06; // radians between services
  * incidents they had, incidents sit on the ring oldest first (clockwise), and
  * links cut across the middle. Busy services and the threads between them
  * stand out at a glance.
+ *
+ * Answers: which services are tied together by shared problems?
  */
 export default function OrbitMap({ data, meta, onIncidentClick, highlightIds = [], shownIds = null, latestId = null }) {
   const [ref, box] = useBox();

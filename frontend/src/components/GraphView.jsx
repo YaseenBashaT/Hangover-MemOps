@@ -20,6 +20,9 @@ const PAD = 24; // how far an island reaches past its dots
  * an engineer), and those lines are weak springs: drag a dot and the islands
  * stretch, incidents it shares details with get tugged along, and the dot
  * settles partway between where it was and where it was dropped.
+ *
+ * Answers: which services keep having incidents, and which incidents belong
+ * together? Good as a first look at the whole memory.
  */
 
 // Where each island sits. Wide screens pack them into the box; phones stack
