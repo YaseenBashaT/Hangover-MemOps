@@ -249,7 +249,10 @@ export default function Ask() {
         <h1 className="text-[2.25rem] font-bold leading-[1.1] sm:text-[2.75rem]">What's firing?</h1>
         <p className="mt-3 max-w-prose text-[1.075rem] text-muted">
           Paste an alert. MemOps looks through every incident your team has resolved and
-          tells you what fixed it last time.
+          tells you what fixed it last time.{" "}
+          <Link to="/about" className="text-teal underline-offset-4 hover:underline">
+            New here?
+          </Link>
         </p>
 
         <div className="mt-8">

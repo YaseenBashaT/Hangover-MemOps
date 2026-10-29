@@ -4,6 +4,7 @@ import Incidents from "./pages/Incidents.jsx";
 import IncidentDetail from "./pages/IncidentDetail.jsx";
 import AddIncident from "./pages/AddIncident.jsx";
 import MemoryMap from "./pages/MemoryMap.jsx";
+import About from "./pages/About.jsx";
 
 function TopBar() {
   const linkCls = ({ isActive }) =>
@@ -26,6 +27,9 @@ function TopBar() {
           <NavLink to="/map" className={linkCls}>
             Memory map
           </NavLink>
+          <NavLink to="/about" className={linkCls}>
+            About
+          </NavLink>
         </nav>
       </div>
     </header>
@@ -43,6 +47,7 @@ export default function App() {
           <Route path="/incidents/new" element={<AddIncident />} />
           <Route path="/incidents/:id" element={<IncidentDetail />} />
           <Route path="/map" element={<MemoryMap />} />
+          <Route path="/about" element={<About />} />
           {/* old link from the previous layout */}
           <Route path="/alert" element={<Navigate to="/" replace />} />
           <Route path="*" element={<Navigate to="/" replace />} />
