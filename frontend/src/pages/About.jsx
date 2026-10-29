@@ -39,7 +39,7 @@ function Section({ title, children }) {
 
 export default function About() {
   return (
-    <div className="mx-auto max-w-page px-4 pb-20 pt-10 sm:px-6 sm:pt-14">
+    <div className="mx-auto max-w-page px-4 pb-20 pt-10 sm:px-6 sm:pt-14 lg:px-10">
       <div className="max-w-[46rem]">
         <h1 className="text-[2.25rem] font-semibold tracking-tight leading-[1.1] sm:text-[2.75rem]">What MemOps is</h1>
         <p className="mt-4 text-[1.2rem] leading-relaxed">

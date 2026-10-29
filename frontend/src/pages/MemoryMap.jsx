@@ -67,7 +67,7 @@ export default function MemoryMap() {
   const latestInfo = latest && meta.get(latest.incident_id);
 
   return (
-    <div className="mx-auto max-w-page px-4 pb-16 pt-10 sm:px-6">
+    <div className="mx-auto max-w-page px-4 pb-16 pt-10 sm:px-6 lg:px-10">
       <h1 className="text-[2.25rem] font-semibold tracking-tight leading-tight">Memory map</h1>
       <p className="mt-2 max-w-prose text-muted">
         Each island is a service and each dot an incident on it. A line joins two incidents
@@ -102,7 +102,7 @@ export default function MemoryMap() {
         <p className="mt-3 text-sm text-accent-strong">The ringed incident is the one MemOps just re-learned.</p>
       )}
 
-      <div className="relative mt-4 min-h-[20rem] overflow-hidden border border-rule bg-sheet sm:h-[70vh] sm:min-h-[28rem]">
+      <div className="relative mt-4 min-h-[20rem] overflow-hidden rounded-xl border border-rule bg-sheet sm:h-[calc(100vh-17rem)] sm:min-h-[30rem]">
         {err && <div className="p-4"><ErrorNote error={err} /></div>}
         {!graph && !err && (
           <div className="flex h-full items-center justify-center">

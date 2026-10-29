@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { api } from "../api.js";
+import { api, forgetIncidents } from "../api.js";
 import { Button, ButtonSpinner, ErrorNote } from "../components/ui.jsx";
 
 const SEVERITIES = ["critical", "high", "medium", "low"];
@@ -81,6 +81,7 @@ export default function AddIncident() {
         resolution_time_minutes: form.resolution_time_minutes ? parseInt(form.resolution_time_minutes, 10) : null,
       };
       const result = await api.logIncident(payload);
+      forgetIncidents();
       const newId = result?.incident?.incident_id || payload.incident_id;
       navigate(`/incidents/${newId}`, { state: { added: true } });
     } catch (e) {
@@ -90,7 +91,7 @@ export default function AddIncident() {
   }
 
   return (
-    <div className="mx-auto max-w-page px-4 pb-20 pt-8 sm:px-6">
+    <div className="mx-auto max-w-page px-4 pb-20 pt-8 sm:px-6 lg:px-10">
       <Link to="/incidents" className="text-[15px] text-accent underline-offset-4 hover:underline">
         All incidents
       </Link>

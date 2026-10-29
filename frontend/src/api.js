@@ -53,6 +53,37 @@ export function loadInsightsOnce() {
   return _insightsPromise;
 }
 
+// The incident list feeds the sidebar, Ask, Incidents and the map: fetch it once
+// and share it. Adding an incident clears it so the next read is fresh.
+let _incidentsPromise = null;
+export function loadIncidentsOnce() {
+  if (!_incidentsPromise) {
+    _incidentsPromise = api.listIncidents().catch((e) => {
+      _incidentsPromise = null;
+      throw e;
+    });
+  }
+  return _incidentsPromise;
+}
+export function forgetIncidents() {
+  _incidentsPromise = null;
+}
+
+// Summary numbers shown in the sidebar and on Ask.
+export function memoryStats(incidents) {
+  const services = new Map();
+  for (const i of incidents) services.set(i.service_affected, (services.get(i.service_affected) || 0) + 1);
+  const times = incidents.map((i) => i.resolution_time_minutes).filter((t) => t != null).sort((a, b) => a - b);
+  const top = [...services.entries()].sort((a, b) => b[1] - a[1])[0];
+  return {
+    incidents: incidents.length,
+    services: services.size,
+    engineers: new Set(incidents.map((i) => i.engineer_name).filter(Boolean)).size,
+    medianFix: times.length ? times[Math.floor(times.length / 2)] : null,
+    busiest: top ? { service: top[0], count: top[1] } : null,
+  };
+}
+
 // Severity colors are theme variables (index.css), shared with tailwind's sev.* and the memory map.
 const SEVERITIES = new Set(["critical", "high", "medium", "low"]);
 
