@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { api, fmtDate, humanize, sevColor } from "../api.js";
 import GraphView from "../components/GraphView.jsx";
+import TimelineMap from "../components/maps/TimelineMap.jsx";
+import OrbitMap from "../components/maps/OrbitMap.jsx";
+import ConceptMap from "../components/maps/ConceptMap.jsx";
 import { Button, ErrorNote, Spinner } from "../components/ui.jsx";
 
 const LEGEND = [
@@ -12,8 +15,38 @@ const LEGEND = [
 ];
 const STEP_MS = 900;
 
+const VIEWS = {
+  islands: {
+    name: "Islands",
+    Map: GraphView,
+    about:
+      "Each island is a service and each dot an incident on it. A line joins two incidents that share something MemOps learned, like an error, a fix or the engineer who handled it. Grab a dot and pull: the lines act like springs.",
+  },
+  timeline: {
+    name: "Timeline",
+    Map: TimelineMap,
+    about:
+      "One lane per service, each incident on the day it happened. An arch joins incidents that share something, so a problem that keeps coming back shows up as a chain along its lane.",
+  },
+  orbit: {
+    name: "Orbit",
+    Map: OrbitMap,
+    about:
+      "Services share the ring, sized by how many incidents they had, with their incidents in date order going clockwise. Lines across the middle join incidents that share something.",
+  },
+  concepts: {
+    name: "Concepts",
+    Map: ConceptMap,
+    about:
+      "The details MemOps learned that more than one incident shares: engineers (@), tickets (#), errors (!) and services (~). Hover one to light up every incident that mentions it.",
+  },
+};
+
 export default function MemoryMap() {
   const navigate = useNavigate();
+  const [params, setParams] = useSearchParams();
+  const view = VIEWS[params.get("view")] ? params.get("view") : "islands";
+  const { Map: ViewMap, about } = VIEWS[view];
   const location = useLocation();
   const [graph, setGraph] = useState(null);
   const [incidents, setIncidents] = useState([]);
@@ -69,11 +102,22 @@ export default function MemoryMap() {
   return (
     <div className="mx-auto max-w-page px-4 pb-16 pt-10 sm:px-6 lg:px-10">
       <h1 className="text-[2.25rem] font-semibold tracking-tight leading-tight">Memory map</h1>
-      <p className="mt-2 max-w-prose text-muted">
-        Each island is a service and each dot an incident on it. A line joins two incidents
-        that share something MemOps learned, like an error, a fix or the engineer who handled
-        it. Grab a dot and pull: the lines act like springs. Click one to see what it shares.
-      </p>
+      <div className="mt-5 inline-flex rounded-lg border border-rule bg-sheet p-1" role="tablist" aria-label="Map style">
+        {Object.entries(VIEWS).map(([key, v]) => (
+          <button
+            key={key}
+            role="tab"
+            aria-selected={view === key}
+            onClick={() => setParams(key === "islands" ? {} : { view: key }, { replace: true })}
+            className={`rounded-md px-3 py-1.5 text-[14px] transition-colors ${
+              view === key ? "bg-raise font-semibold text-ink" : "text-muted hover:text-ink"
+            }`}
+          >
+            {v.name}
+          </button>
+        ))}
+      </div>
+      <p className="mt-3 max-w-prose text-muted">{about} Click a dot to see what it shares.</p>
 
       <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-muted">
         {step === null ? (
@@ -110,7 +154,8 @@ export default function MemoryMap() {
           </div>
         )}
         {graph && (
-          <GraphView
+          <ViewMap
+            key={view}
             data={graph}
             meta={meta}
             onIncidentClick={open}
@@ -132,7 +177,13 @@ export default function MemoryMap() {
         )}
       </div>
       <p className="mt-2 text-sm text-muted">
-        <span className="hidden sm:inline">Scroll to zoom in and see every incident number, drag the background to move around.</span>
+        <span className="hidden sm:inline">
+          {view === "islands"
+            ? "Scroll to zoom in and see every incident number, drag the background to move around."
+            : view === "timeline"
+              ? "Older incidents on the left. Narrow screens scroll sideways."
+              : "Hover anything to light up what it's connected to."}
+        </span>
         <span className="sm:hidden">Tap a dot to see what it shares.</span>
       </p>
     </div>

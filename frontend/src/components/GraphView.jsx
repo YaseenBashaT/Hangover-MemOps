@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as d3 from "d3";
 import { fmtDate, humanize, sevColor } from "../api.js";
+import { buildModel } from "./mapModel.js";
 
 const NODE_R = { critical: 12, high: 11, medium: 10, low: 9 };
 // colors are theme variables from index.css, set through style so they follow the theme
@@ -20,32 +21,6 @@ const PAD = 24; // how far an island reaches past its dots
  * stretch, incidents it shares details with get tugged along, and the dot
  * settles partway between where it was and where it was dropped.
  */
-function buildModel(data) {
-  const byId = new Map(data.nodes.map((n) => [n.id, n]));
-  const incidents = data.nodes.filter((n) => n.node_kind === "incident");
-
-  // incident -> the Entity nodes it links to
-  const details = new Map(incidents.map((i) => [i.id, new Set()]));
-  for (const l of data.links) {
-    const s = l.source.id ?? l.source;
-    const t = l.target.id ?? l.target;
-    if (details.has(s) && byId.get(t)?.type === "Entity") details.get(s).add(t);
-    if (details.has(t) && byId.get(s)?.type === "Entity") details.get(t).add(s);
-  }
-
-  const links = [];
-  for (let a = 0; a < incidents.length; a++)
-    for (let b = a + 1; b < incidents.length; b++) {
-      const shared = [...details.get(incidents[a].id)].filter((x) => details.get(incidents[b].id).has(x));
-      if (shared.length)
-        links.push({ a: incidents[a].id, b: incidents[b].id, shared: shared.map((x) => byId.get(x).label) });
-    }
-
-  const services = [...d3.group(incidents, (i) => i.service || "unknown")]
-    .map(([name, items]) => ({ name, items }))
-    .sort((a, b) => b.items.length - a.items.length);
-  return { incidents, links, services };
-}
 
 // Where each island sits. Wide screens pack them into the box; phones stack
 // them down the page and the map grows taller instead.
