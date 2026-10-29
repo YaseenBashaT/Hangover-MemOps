@@ -21,13 +21,25 @@ So at 3am you rediscover what the team already knew. You raise the pool size and
 
 ## What MemOps does
 
-Every resolved incident goes into a knowledge graph. The service, the error log, the Slack thread, the Jira ticket, the git commits, and the fix that actually worked all get stored together. Seventeen real incidents are seeded in, covering payments-api, recommendation-service, api-gateway, and seven other services.
+Every resolved incident goes into a knowledge graph. The service, the error log, the Slack thread, the Jira ticket, the git commits, and the fix that actually worked all get stored together. Seventeen sample incidents are seeded in, spread across payments-api, recommendation-service, api-gateway, and seven other services from March 2024 to August 2025.
 
-When a new alert fires, an engineer pastes the alert text into MemOps. The system reads it, walks the graph for anything related, and answers with two things: a suggested fix drawn from past resolutions, and the specific incidents behind that suggestion. For the payments-api pool alert it returns INC-2024-1014, INC-2025-0203, and INC-2025-0819, ranked by how closely each one matches, and every card shows its date and the fix that was applied. The suggested fix is not generic advice about connection pools. It describes dynamic autoscaling with a floor of 50 connections and a ceiling of 200, because that is what the August incident recorded.
+When a new alert fires, the engineer pastes it into the terminal on the **Ask** page. MemOps reads it, walks the graph for anything related, and answers in about ten seconds with a verdict ("This has happened before."), a confidence score, a suggested fix drawn from past resolutions, and the evidence behind it. For the payments-api pool alert it returns INC-2024-1014, INC-2025-0203, and INC-2025-0819, ranked by how closely each one matches, places them on a timeline so you can see the problem coming back, and shows the fix each one applied. The suggested fix is not generic advice about connection pools. It describes PgBouncer and dynamic autoscaling with a floor of 50 connections and a ceiling of 200, because that is what the team's past incidents recorded.
 
-The engineer reads the history, decides the suggestion is right, and clicks Approve Fix. Two things happen. The incident is marked resolved, and the graph runs an enrichment pass that strengthens the links between that incident and the ones it connects to. Back on the dashboard, the nodes that were reinforced grow brighter and their edges thicken. You watch the memory get stronger at the moment the fix is approved. That loop is the reason the tool exists. The more the team feeds it, the sharper its recall gets.
+If the suggestion works, the engineer clicks **This fix worked**. MemOps marks the incident resolved and runs an enrichment pass that strengthens the links between that incident and the ones around it, then reports how the graph changed (for example, how many links it has before and after). A link opens the memory map with the re-learned incident ringed. The more the team feeds it, the sharper its recall gets.
 
-The dashboard draws the whole graph as a D3 force layout. Incident nodes are colored by severity, from red for critical down to green for low, and the gray nodes are the entities that tie incidents together. Click any incident node and its detail page opens: the error log, the Slack thread as it actually happened, the Jira ticket, the commits, and the other incidents that share its service. A small line under the insights panel shows when the graph last ran its analysis, so the system reads as something that keeps watching rather than something you have to poke.
+The rest of the app:
+
+- **Incidents** lists everything in memory, newest first, with a month-by-month activity chart, filters by service and severity (kept in the URL, so `/incidents?service=payments-api` is shareable), and the patterns MemOps noticed across incidents. Each incident page shows the fix, the error log, the Slack thread as it happened, the Jira ticket, the commits, and the other incidents on the same service. **Add incident** logs a new one into the graph.
+- **Memory map** draws the graph four ways, each answering a different question:
+  - **Islands**: which services keep having incidents, and which incidents belong together? Each service is an island and the links between incidents act like springs you can drag.
+  - **Timeline**: does a problem keep coming back, and how long between each time? One lane per service, incidents on the day they happened.
+  - **Orbit**: which services are tied together by shared problems? Services share a ring, sized by incident count, with links across the middle.
+  - **Concepts**: what exactly links these incidents? The engineers, tickets, errors, and services that two or more incidents share, wired to those incidents.
+  
+  "Replay how it learned" adds the incidents back one by one in the order they happened.
+- **About** explains what MemOps is, who it is for, and how it works.
+
+The site has a light and a dark theme, and works on phones.
 
 ## How Cognee powers the memory
 
@@ -37,18 +49,18 @@ MemOps uses Cognee 1.2.2 as its memory layer. Every call into Cognee lives behin
 
 **recall() finds related incidents when a new alert fires.** MemOps turns the alert text into a direct question and calls `recall()` with the GRAPH_COMPLETION search type for the suggested fix. For the ranked "Related Past Incidents" cards, it uses `recall()` with `SearchType.CHUNKS` — Cognee's vector store returns the most relevant document chunks, each tagged with an Incident ID, and those IDs are mapped to their structured incident cards. The ranking is real embedding similarity from Cognee's own vector store (HuggingFace `all-MiniLM-L6-v2`), not keyword matching. For the payments-api pool alert, INC-2024-1014, INC-2025-0203, and INC-2025-0819 rank above INC-2025-0118 because the embedding space separates pool-exhaustion incidents from the unrelated auth outage on the same service.
 
-**improve() strengthens fix patterns when an engineer approves.** Approving a fix calls `improve()` on the `incidents` dataset. Cognee re-runs its enrichment pipeline and re-indexes the triplet embeddings around the resolved incident and its neighbors. To make the learning visible, MemOps captures a before-recall and an after-recall (using the same canonical query) around the `improve()` call and returns both to the frontend. The MemifyCard's "See what changed" section shows the two answers side-by-side so the judge can see whether the graph's answer evolved. If the answers are identical the card says "graph re-indexed; answer already optimal" — never a fabricated diff.
+**improve() strengthens fix patterns when an engineer confirms a fix.** Clicking "This fix worked" (on Ask) or "Re-learn this incident" (on an incident page) calls `improve()` on the `incidents` dataset. Cognee re-runs its enrichment pipeline and re-indexes the triplet embeddings around the resolved incident and its neighbors. MemOps counts the graph's nodes and edges before and after, and also runs the same recall query before and after `improve()`; the API returns both answers in `learning_evidence`, with the note "graph re-indexed; answer already optimal" when they are identical rather than a made-up difference. The UI shows the change in links and the related incidents that were reinforced.
 
 **forget() prunes closed datasets.** When a dataset is done, `forget()` drops it from the graph. MemOps puts an explicit name check in front of the shared `incidents` dataset so a stray call cannot erase the seeded history by accident.
 
-## The four Cognee primitives — all live in the UI
+## The four Cognee primitives
 
 | Primitive | What MemOps does | Where to trigger it |
 |---|---|---|
-| `remember()` | Formats an incident into a text block and ingests it into the Cognee graph | **Log Incident** page → fill form → submit |
-| `recall()` | Retrieves relevant chunks (ranking) + GRAPH_COMPLETION (suggested fix) | **New Alert** page → paste alert → Analyze |
-| `improve()` | Re-indexes graph triplets after a resolution; before/after evidence captured | **New Alert** or **Incident Detail** → Approve Fix |
-| `forget()` | Prunes a named dataset from graph memory | Demonstrated in the demo video against a scratch dataset |
+| `remember()` | Formats an incident into a text block and ingests it into the Cognee graph | **Incidents → Add incident** → fill the form → submit |
+| `recall()` | Retrieves relevant chunks (ranking) + GRAPH_COMPLETION (suggested fix) | **Ask** → paste an alert → Ask memory |
+| `improve()` | Re-indexes graph triplets after a resolution; before/after evidence captured | **Ask** → This fix worked, or an incident page → Re-learn this incident |
+| `forget()` | Prunes a named dataset from graph memory | `POST /api/forget` with a scratch dataset (the shared `incidents` dataset is protected) |
 
 The LLM provider is a config value, read from environment variables in that same file. MemOps runs on Groq's `openai/gpt-oss-20b` right now. It used `llama-3.3-70b-versatile` until Groq retired that model, then briefly `qwen/qwen3.8-27b`, which Groq's free tier caps at 1,000 output tokens a minute. One graph extraction can ask for more than that, so every call sat waiting. Switching models means changing one environment variable, and any other OpenAI-compatible endpoint works the same way. Embeddings come from a separate model, so the graph doesn't need to be rebuilt.
 
@@ -56,18 +68,17 @@ Groq's free tier also allows 8,000 tokens a minute per model, so MemOps keeps it
 
 ## The demo
 
-1. Open [mem-ops.vercel.app](https://mem-ops.vercel.app).
-2. Look at the knowledge graph. Seventeen incident nodes, colored by severity, connected through services and fixes.
-3. Read one of the proactive insights on the right. Each names a service and cites real incident IDs.
-4. Click **New Alert** and paste: `payments-api is throwing connection pool errors, pool appears exhausted, service degraded`
-5. Click **Analyze**. Watch the three progress stages: embedding → graph traversal → synthesis. Results show five related incidents ranked by real cosine similarity from Cognee's vector store (non-round match scores, not fabricated ordinals), and a suggested fix synthesized from the most relevant past resolution.
-6. Click **Approve Fix → Reinforce Memory**. The MemifyCard appears — expand "See what changed" to view the before/after recall evidence of what the graph learned.
-7. Watch the return to the dashboard. The reinforced nodes are highlighted green.
-8. Click **Log Incident** in the nav. Fill out the form and submit — watch a new node appear in the graph (`remember()` live).
+1. Open [mem-ops.vercel.app](https://mem-ops.vercel.app). The **About** page explains the idea in a minute.
+2. On **Ask**, click the **Pool exhausted** sample, or paste: `payments-api is throwing connection pool errors, pool appears exhausted, service degraded`
+3. Watch the terminal work through its steps: reading the alert, searching past incidents, writing up the fix. In about ten seconds you get the verdict, a confidence score, the suggested fix, and the five closest past incidents with their match scores and a timeline.
+4. Click **This fix worked**. MemOps re-learns the incident and shows how its links changed. Follow **See it on the memory map** to find it ringed.
+5. On **Memory map**, switch between Islands, Timeline, Orbit and Concepts. In Timeline, the payments-api lane shows the pool problem coming back three times. In Concepts, hover `@ mike torres` to light up his incidents.
+6. Open **Incidents**, filter to payments-api, and open INC-2025-0203 to read the Slack thread, the ticket and the commit behind the fix.
+7. Click **Add incident**, fill in the form and submit. The new incident joins the graph (`remember()` live) and shows up in later answers.
 
 ## Tech stack
 
-The backend is FastAPI. The memory layer is Cognee, which runs its LLM calls against Groq (`openai/gpt-oss-20b`) and computes embeddings through HuggingFace's hosted inference API (`all-MiniLM-L6-v2`), which keeps the backend's memory footprint low enough to deploy on a small instance. The graph itself lives in Cognee's embedded ladybug store. The frontend is React, built with Vite and styled with Tailwind. The graph view is D3.js, and it draws the real nodes and edges the backend returns rather than any canned layout.
+The backend is FastAPI. The memory layer is Cognee, which runs its LLM calls against Groq (`openai/gpt-oss-20b`) and computes embeddings through HuggingFace's hosted inference API (`all-MiniLM-L6-v2`), which keeps the backend's memory footprint low enough to deploy on a small instance. The graph itself lives in Cognee's embedded ladybug store. The frontend is React 19, built with Vite and styled with Tailwind, using IBM Plex Sans and JetBrains Mono, with VT323 for the terminal. The four memory map views are drawn with D3 from the real nodes and edges the backend returns, not a canned layout.
 
 ## Fast restarts
 
@@ -105,7 +116,7 @@ EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
 EMBEDDING_DIMENSIONS=384
 ```
 
-Seed the graph with the seventeen incidents. This wipes any existing data, ingests every incident, and fills the structured store the dashboard reads:
+Seed the graph with the seventeen incidents. This wipes any existing data, ingests every incident, and fills the structured store the site reads:
 
 ```
 python reseed17.py
